@@ -26,21 +26,14 @@ wss.on('connection', function connection(ws) {
     ws.send('Hello from server to client');
 });
 
-// Read from stdin and send to the connected client
-// process.stdin.on('data', function(data) {
-//     if (clientSocket) {
-//         clientSocket.send(data.toString().trim());
-//     }
-// });
-
 // Read from USB serial device
 // const port = new SerialPort({ path: '/dev/ttyUSB0', baudRate: 9600 }); // For Raspberry Pi
 const port = new SerialPort({ path: 'COM5', baudRate: 9600 }); // For Windows
 
 port.on('data', (data) => {
-    console.log(`Received: ${data}`);
+    console.log(data.toString());
     if (clientSocket) {
-        clientSocket.send(data.toString().trim());
+        clientSocket.send(data.toString());
     }
 });
 
