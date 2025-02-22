@@ -1,4 +1,5 @@
 const WebSocketServer = require('ws').Server;
+const { SerialPort } = require('serialport');
 
 const wss = new WebSocketServer({ port: 8080 });
 console.log('Server is running on port 8080');
@@ -26,8 +27,23 @@ wss.on('connection', function connection(ws) {
 });
 
 // Read from stdin and send to the connected client
-process.stdin.on('data', function(data) {
+// process.stdin.on('data', function(data) {
+//     if (clientSocket) {
+//         clientSocket.send(data.toString().trim());
+//     }
+// });
+
+// Read from USB serial device
+// const port = new SerialPort({ path: '/dev/ttyUSB0', baudRate: 9600 }); // For Raspberry Pi
+const port = new SerialPort({ path: 'COM5', baudRate: 9600 }); // For Windows
+
+port.on('data', (data) => {
+    console.log(`Received: ${data}`);
     if (clientSocket) {
         clientSocket.send(data.toString().trim());
     }
+});
+
+port.on('error', (err) => {
+    console.error('Serial port error:', err);
 });
