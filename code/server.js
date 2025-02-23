@@ -22,25 +22,30 @@ function startWebSocketServer(port, onClientConnected) {
 
         ws.on('close', function close() {
             console.log('disconnected');
-            clientSocket = null;
+            if (global.serialPort && global.serialPort.isOpen) {
+                global.serialPort.close((err) => {
+                    if (err) console.error('Error closing serial port:', err);
+                    else console.log('Serial port closed');
+                });
+            }
         });
 
-        ws.send('Hello from server to client');
+        // ws.send('Hello from server to client');  // Commented to not spam the client
     });
 }
 
 function startSerialPort (path, baudRate, clientSocket){
     // Read from USB serial device
-    const port = new SerialPort({ path: path, baudRate: baudRate });
+    global.serialPort = new SerialPort({ path: path, baudRate: baudRate });
 
-    port.on('data', (data) => {
+    global.serialPort.on('data', (data) => {
         console.log(data.toString());
         if (clientSocket) {
             clientSocket.send(data.toString());
         }
     });
 
-    port.on('error', (err) => {
+    global.serialPort.on('error', (err) => {
         console.error('Serial port error:', err);
     });
 }
@@ -49,27 +54,39 @@ function connectToHotspot (hotspotName, hotspotPassword, callback) {
     // Initialize with default settings
     wifiControl.init({ debug: true });
 
-    wifiControl.scanForWiFi((error, response) => {
-        if (error) console.log(error);
-        else console.log(response.networks);
-    });
+    function attemptConnection() {
+        console.log(`Attempting to connect to ${hotspotName}...`);
+        const ap = { ssid: hotspotName, password: hotspotPassword };
 
-    // Connect to a Wi-Fi network
-    const ap = { ssid: hotspotName, password: hotspotPassword };
-    wifiControl.connectToAP(ap, (error, response) => {
-        if (error) {
-            console.log('Connection error:', error);
-        } else {
-            console.log('Connected to WiFi:', response);
-            callback(true);
-        }
-    });
+        wifiControl.connectToAP(ap, (error, response) => {
+            if (error) {
+                console.log('Connection error:', error);
+                setTimeout(attemptConnection, 5000); // Retry after delay
+            } else {
+                console.log('Connected to WiFi:', response);
+                callback(true);
+                monitorWifi(hotspotName);
+            }
+        });
+    }
+
+    attemptConnection();
+}
+
+function monitorWifi(hotspotName) {
+    setInterval(() => {
+        wifiControl.getIfaceState((error, state) => {
+            if (error || state.connection === 'disconnected') {
+                console.log('Lost WiFi connection, retrying...');
+                connectToHotspot(hotspotName, 'testtest', () => {});
+            }
+        });
+    }, 10000);
 }
 
 function main () {
     const path = 'COM5' // /dev/ttyUSB0 for Raspberry Pi
     const baudRate = 9600;
-    let clientSocket = null;
     const hotspotName = 'test';
     const hotspotPassword = 'testtest';
 
@@ -78,8 +95,7 @@ function main () {
             console.log('Connected to hotspot');
             startWebSocketServer(8080, (ws) => {
                 console.log('Client connected, starting serial port...');
-                clientSocket = ws;
-                startSerialPort(path, baudRate, clientSocket);
+                startSerialPort(path, baudRate, ws);
             });
 
         }
