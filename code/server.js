@@ -1,5 +1,6 @@
 const WebSocketServer = require('ws').Server;
 const { SerialPort } = require('serialport');
+const wifiControl = require('wifi-control');
 
 function startWebSocketServer(port, onClientConnected) {
     const wss = new WebSocketServer({ port });
@@ -44,16 +45,46 @@ function startSerialPort (path, baudRate, clientSocket){
     });
 }
 
+function connectToHotspot (hotspotName, hotspotPassword, callback) {
+    // Initialize with default settings
+    wifiControl.init({ debug: true });
+
+    wifiControl.scanForWiFi((error, response) => {
+        if (error) console.log(error);
+        else console.log(response.networks);
+    });
+
+    // Connect to a Wi-Fi network
+    const ap = { ssid: hotspotName, password: hotspotPassword };
+    wifiControl.connectToAP(ap, (error, response) => {
+        if (error) {
+            console.log('Connection error:', error);
+        } else {
+            console.log('Connected to WiFi:', response);
+            callback(true);
+        }
+    });
+}
+
 function main () {
     const path = 'COM5' // /dev/ttyUSB0 for Raspberry Pi
     const baudRate = 9600;
     let clientSocket = null;
+    const hotspotName = 'test';
+    const hotspotPassword = 'testtest';
 
-    startWebSocketServer(8080, (ws) => {
-        console.log('Client connected, starting serial port...');
-        clientSocket = ws;
-        startSerialPort(path, baudRate, clientSocket);
+    connectToHotspot(hotspotName, hotspotPassword, (connected) => {
+        if (connected) {
+            console.log('Connected to hotspot');
+            startWebSocketServer(8080, (ws) => {
+                console.log('Client connected, starting serial port...');
+                clientSocket = ws;
+                startSerialPort(path, baudRate, clientSocket);
+            });
+
+        }
     });
+
 }
 
 main();
