@@ -3,7 +3,7 @@ const { SerialPort } = require('serialport');
 const wifiControl = require('wifi-control');
 
 function startWebSocketServer(port, onClientConnected) {
-    const wss = new WebSocketServer({ port });
+    const wss = new WebSocketServer({ port, host: '0.0.0.0' });
     console.log(`Server is running on port ${port}`);
 
     wss.on('connection', function connection(ws) {
@@ -92,12 +92,12 @@ function main () {
 
     connectToHotspot(hotspotName, hotspotPassword, (connected) => {
         if (connected) {
+            // Allow the firewall and display the IP address
             console.log('Connected to hotspot');
             startWebSocketServer(8080, (ws) => {
                 console.log('Client connected, starting serial port...');
                 startSerialPort(path, baudRate, ws);
             });
-
         }
     });
 
