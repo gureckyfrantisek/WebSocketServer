@@ -17,3 +17,5 @@ Pro nastavení na Raspberry Pi je třeba:
     1. Spustit sudo chrontab -e
     2. Vespod nastavit @reboot node /home/pi/Desktop/GNSSApp/server.js &
 6. Restartovat a vše by mělo v pořádku proběhnout :D
+
+Nezapomenout nastavit na každém zařízení jiný hotspot, aby se přijímače nepřipojovali na jeden.
