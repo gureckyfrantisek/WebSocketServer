@@ -52,7 +52,13 @@ function startSerialPort (path, baudRate, clientSocket){
 
 function connectToHotspot (hotspotName, hotspotPassword, callback) {
     // Initialize with default settings
-    wifiControl.init({ debug: true });
+    var settings = {
+        debug: true || false,
+        iface: 'wlan0',
+        connectionTimeout: 10000
+    };
+     
+    wifiControl.init( settings );
 
     function attemptConnection() {
         console.log(`Attempting to connect to ${hotspotName}...`);
@@ -63,7 +69,7 @@ function connectToHotspot (hotspotName, hotspotPassword, callback) {
                 console.log('Connection error:', error);
                 setTimeout(attemptConnection, 5000); // Retry after delay
             } else {
-                console.log('Connected to WiFi:', response);
+                console.log(response.msg);
                 callback(true);
                 monitorWifi(hotspotName);
             }
@@ -85,14 +91,14 @@ function monitorWifi(hotspotName) {
 }
 
 function main () {
-    const path = 'COM5' // /dev/ttyUSB0 for Raspberry Pi
+    const path = '/dev/gps0' // /dev/gps0 for Raspberry Pi / 'COM5' for Windows
     const baudRate = 9600;
     const hotspotName = 'test';
     const hotspotPassword = 'testtest';
 
     connectToHotspot(hotspotName, hotspotPassword, (connected) => {
         if (connected) {
-            // Allow the firewall and display the IP address
+            // Display the IP address
             console.log('Connected to hotspot');
             startWebSocketServer(8080, (ws) => {
                 console.log('Client connected, starting serial port...');
