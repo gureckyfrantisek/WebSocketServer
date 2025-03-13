@@ -83,8 +83,12 @@ function startWebSocketServer(port, onClientConnected) {
         console.log('connected');
         
         // Close UDP broadcast after connection
-        client.close();
-        clearInterval(udpInterval);
+        try {
+            client.close();
+            clearInterval(udpInterval);
+        } catch (e) {
+            console.error('No client to close');
+        }
         
         // Pass the connected socket to the callback
         onClientConnected(ws);
