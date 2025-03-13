@@ -16,6 +16,7 @@ Pro nastavení na Raspberry Pi je třeba:
 5. Nastavit automatické spouštění:
     1. Spustit sudo crontab -e
     2. Vespod nastavit @reboot node /home/pi/Desktop/GNSSApp/server.js &
-6. Restartovat a vše by mělo v pořádku proběhnout :D
+6. Pro jistotu povolit UDP firewallem: sudo ufw allow 41234/udp
+7. Restartovat a vše by mělo v pořádku proběhnout :D
 
 Nezapomenout nastavit na každém zařízení jiný hotspot, aby se přijímače nepřipojovali na jeden.
