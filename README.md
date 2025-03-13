@@ -14,7 +14,7 @@ Pro nastavení na Raspberry Pi je třeba:
     3. Nastavit podle toho proměnnou path v mainu server.js
 4. Přetáhnout soubory server.js a node_modules na plochu do složky GNSSApp
 5. Nastavit automatické spouštění:
-    1. Spustit sudo chrontab -e
+    1. Spustit sudo crontab -e
     2. Vespod nastavit @reboot node /home/pi/Desktop/GNSSApp/server.js &
 6. Restartovat a vše by mělo v pořádku proběhnout :D
 
