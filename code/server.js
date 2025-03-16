@@ -62,7 +62,7 @@ function startUdpBroadcast(client, ip, port, broadcastIp) {
                 }
             });
         }
-    }, 5000);
+    }, 1000);
 
     return broadcastInterval;
 }
@@ -72,8 +72,8 @@ function startWebSocketServer(port, onClientConnected) {
     // Start UDP broadcast and end it, after a client has connected
     console.log('piIp in start WSS: ', localIp);
     
-    const client = dgram.createSocket('udp4');
-    const udpInterval = startUdpBroadcast(client, localIp, 41234, broadcastIp);
+    let client = dgram.createSocket('udp4');
+    let udpInterval = startUdpBroadcast(client, localIp, 41234, broadcastIp);
     
     const wss = new WebSocketServer({ port, host: '0.0.0.0' });
     console.log(`Server is running on port ${port}`);
@@ -87,7 +87,7 @@ function startWebSocketServer(port, onClientConnected) {
             client.close();
             clearInterval(udpInterval);
         } catch (e) {
-            console.error('No client to close');
+            console.log('No client to close');
         }
         
         // Pass the connected socket to the callback
@@ -98,6 +98,9 @@ function startWebSocketServer(port, onClientConnected) {
         
         ws.on('message', function message(data) {
             console.log('Server received: %s', data);
+            if (global.serialPort && global.serialPort.isOpen) {
+                global.serialPort.write(data);
+            }
         });
 
         ws.on('close', function close() {
@@ -107,6 +110,12 @@ function startWebSocketServer(port, onClientConnected) {
                     if (err) console.error('Error closing serial port:', err);
                     else console.log('Serial port closed');
                 });
+            }
+            try {
+                client = dgram.createSocket('udp4');
+                udpInterval = startUdpBroadcast(client, localIp, 41234, broadcastIp);
+            } catch(e) {
+                console.log('Cannot open client');
             }
         });
 
@@ -171,8 +180,8 @@ function monitorWifi(hotspotName) {
 }
 
 function main () {
-    const path = '/dev/gps0' // /dev/gps0 for Raspberry Pi / 'COM5' for Windows
-    const baudRate = 9600;
+    const path = '/dev/serial0' // /dev/serial0 for Raspberry Pi GPIO pins / 'COM5' for Windows
+    const baudRate = 115200;
     const hotspotName = 'test';
     const hotspotPassword = 'testtest';
 
