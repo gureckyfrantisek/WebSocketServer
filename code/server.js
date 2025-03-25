@@ -160,7 +160,7 @@ function connectToHotspot (hotspotName, hotspotPassword, callback) {
             } else {
                 console.log(response.msg);
                 callback(true);
-                monitorWifi(hotspotName);
+                monitorWifi(hotspotName, hotspotPassword);
             }
         });
     }
@@ -168,12 +168,12 @@ function connectToHotspot (hotspotName, hotspotPassword, callback) {
     attemptConnection();
 }
 
-function monitorWifi(hotspotName) {
+function monitorWifi(hotspotName, hotspotPassword) {
     setInterval(() => {
         wifiControl.getIfaceState((error, state) => {
             if (error || state.connection === 'disconnected') {
                 console.log('Lost WiFi connection, retrying...');
-                connectToHotspot(hotspotName, 'testtest', () => {});
+                connectToHotspot(hotspotName, hotspotPassword, () => {});
             }
         });
     }, 10000);
