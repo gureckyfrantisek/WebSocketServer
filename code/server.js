@@ -3,6 +3,8 @@ const { SerialPort } = require('serialport');
 const wifiControl = require('wifi-control');
 const os = require('os');
 const dgram = require('dgram');
+const fs = require('fs');
+const { execSync } = require('child_process');
 
 function getBroadcastIp(ip, netmask) {
     // Convert the IP address and netmask to binary strings
@@ -44,98 +46,34 @@ function getIps() {
     return {localIp, broadcastIp};
 }
 
-function startUdpBroadcast(client, ip, port, broadcastIp) {
-    client.bind(() => {
-        client.setBroadcast(true); // Enable broadcast
-    });
+function startUdpServer(port, serialPath, baudRate) {
+    const { localIp, broadcastIp } = getIps();
+    const server = dgram.createSocket('udp4');
+    const client = dgram.createSocket('udp4');
     
-    console.log('Ip in UDP broadcast: ', ip);
-
-    const broadcastInterval = setInterval(() => {
-        if (client) {
-            const message = ip.toString(); // Ensure ip is a string
-            client.send(message, 0, message.length, port, broadcastIp, (err) => {
-                if (err) {
-                    console.error('Error broadcasting UDP message:', err);
-                } else {
-                    console.log(`Broadcasting server IP: ${message} to ${broadcastIp}:${port}`);
-                }
-            });
+    let serialPort = new SerialPort({ path: serialPath, baudRate });
+    
+    server.on('message', (msg, rinfo) => {
+        if (rinfo.address === localIp) {
+            return;
         }
-    }, 1000);
-
-    return broadcastInterval;
-}
-
-function startWebSocketServer(port, onClientConnected) {
-    const {localIp, broadcastIp} = getIps();
-    // Start UDP broadcast and end it, after a client has connected
-    console.log('piIp in start WSS: ', localIp);
-    
-    let client = dgram.createSocket('udp4');
-    let udpInterval = startUdpBroadcast(client, localIp, 41234, broadcastIp);
-    
-    const wss = new WebSocketServer({ port, host: '0.0.0.0' });
-    console.log(`Server is running on port ${port}`);
-    
-    wss.on('connection', function connection(ws) {
-        // A client has connected
-        console.log('connected');
-        
-        // Close UDP broadcast after connection
-        try {
-            client.close();
-            clearInterval(udpInterval);
-        } catch (e) {
-            console.log('No client to close');
-        }
-        
-        // Pass the connected socket to the callback
-        onClientConnected(ws);
-        
-        // Declare actions for the server
-        ws.on('error', console.error);
-        
-        ws.on('message', function message(data) {
-            console.log('Server received: %s', data);
-            if (global.serialPort && global.serialPort.isOpen) {
-                global.serialPort.write(data);
-            }
-        });
-
-        ws.on('close', function close() {
-            console.log('disconnected');
-            if (global.serialPort && global.serialPort.isOpen) {
-                global.serialPort.close((err) => {
-                    if (err) console.error('Error closing serial port:', err);
-                    else console.log('Serial port closed');
-                });
-            }
-            try {
-                client = dgram.createSocket('udp4');
-                udpInterval = startUdpBroadcast(client, localIp, 41234, broadcastIp);
-            } catch(e) {
-                console.log('Cannot open client');
-            }
-        });
-
-        // ws.send('Hello from server to client');  // Commented to not spam the client
-    });
-}
-
-function startSerialPort (path, baudRate, clientSocket){
-    // Read from USB serial device
-    global.serialPort = new SerialPort({ path: path, baudRate: baudRate });
-
-    global.serialPort.on('data', (data) => {
-        console.log('Serial port incoming data: ', data.toString());
-        if (clientSocket) {
-            clientSocket.send(data.toString());
+        console.log(`Received from ${rinfo.address}:${rinfo.port} - ${msg}`);
+        if (serialPort.isOpen) {
+            serialPort.write(msg);
         }
     });
+    
+    server.bind(port, () => {
+        console.log(`UDP server listening on ${localIp}:${port}`);
+    });
 
-    global.serialPort.on('error', (err) => {
-        console.error('Serial port error:', err);
+    client.bind(port, () => {
+        client.setBroadcast(true);
+    });
+    
+    serialPort.on('data', (data) => {
+        console.log('Serial Data:', data.toString());
+        client.send(data, 0, data.length, port, broadcastIp);
     });
 }
 
@@ -184,15 +122,12 @@ function main () {
     const baudRate = 115200;
     const hotspotName = 'test';
     const hotspotPassword = 'testtest';
+    const udpPort = 41234;
 
     connectToHotspot(hotspotName, hotspotPassword, (connected) => {
         if (connected) {
-            // Allow the firewall and display the IP address
-            console.log('Connected to hotspot');
-            startWebSocketServer(8080, (ws) => {
-                console.log('Client connected, starting serial port...');
-                startSerialPort(path, baudRate, ws);
-            });
+            console.log('Connected to hotspot, starting UDP server...');
+            startUdpServer(udpPort, pathath, baudRate);
         }
     });
 
