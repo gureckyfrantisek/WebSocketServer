@@ -182,7 +182,7 @@ function monitorWifi(hotspotName, hotspotPassword) {
 function main () {
     const path = '/dev/serial0' // /dev/serial0 for Raspberry Pi GPIO pins / 'COM5' for Windows
     const baudRate = 115200;
-    const hotspotName = 'test';
+    const hotspotName = 'test';     // In reality use the K155GNSSAppX format for name and password
     const hotspotPassword = 'testtest';
 
     connectToHotspot(hotspotName, hotspotPassword, (connected) => {
