@@ -1,0 +1,29 @@
+[Unit]
+Description=K155 GNSS server
+Documentation=https://github.com/DilnaC004/K155GNSSapp
+# The receiver hangs off a serial port and the beacon needs an address
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=root
+WorkingDirectory=/home/pi/GNSSApp
+EnvironmentFile=/home/pi/GNSSApp/.env
+ExecStart=/home/pi/GNSSApp/.venv/bin/python -m app
+
+# Restart on any exit, including a clean one, with a pause so a broken
+# receiver cannot turn into a restart loop
+Restart=always
+RestartSec=5
+
+# Give up only after many failures, a field unit should keep trying
+StartLimitIntervalSec=300
+StartLimitBurst=20
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=k155-gnss
+
+[Install]
+WantedBy=multi-user.target

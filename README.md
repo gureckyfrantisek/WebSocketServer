@@ -5,6 +5,259 @@ Kód pro server pro přenos dat.
 
 Odkaz na hlavní repositář: https://github.com/DilnaC004/K155GNSSapp
 
+Server se přepisuje z Node.js do Pythonu (FastAPI), aby k přenosu dat šlo přidat
+i REST rozhraní pro statická měření a ukládání surových UBX dat na flash disk.
+Původní Node.js verze zůstává ve složce `code` jako reference, dokud nebude
+Python verze odzkoušená na Raspberry Pi.
+
+## Python server (FastAPI)
+
+### Struktura
+
+```
+app/
+  main.py            spuštění aplikace a registrace routerů
+  core/              logika - sériový port, discovery, WiFi, měření
+  routers/           HTTP a WebSocket endpointy
+```
+
+Nastavení se čte z proměnných prostředí, výchozí hodnoty jsou v `.env.example`.
+Pro lokální běh stačí soubor zkopírovat na `.env` a upravit.
+
+### Instalace
+
+Potřeba je Python 3.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate      # na Windows: .venv/Scripts/activate
+pip install -r requirements.txt
+```
+
+Pokud pip hlásí `CERTIFICATE_VERIFY_FAILED` (firemní síť), přidat:
+
+```bash
+pip install -r requirements.txt --trusted-host pypi.org --trusted-host files.pythonhosted.org
+```
+
+### Spuštění
+
+```bash
+python -m app
+```
+
+Na Raspberry Pi je pro přístup k sériovému portu potřeba sudo:
+
+```bash
+sudo .venv/bin/python -m app
+```
+
+Server poslouchá na `0.0.0.0` a na portu z proměnné `SERVER_PORT`. Samotné
+`uvicorn app.main:app` se pro běžný provoz nehodí, protože se bez parametrů
+naváže jen na `127.0.0.1` a telefon se pak nemá kam připojit, i když ho
+discovery navádí na správnou adresu.
+
+Dokumentace endpointů se generuje sama na `http://<ip>:8080/docs`.
+
+### Vývoj bez přijímače
+
+Proměnná `GNSS_SIMULATE=1` nahradí sériový port generátorem platných NMEA vět
+(jedna dvojice GGA a RMC za sekundu). Díky tomu jde všechno otestovat na PC bez
+připojeného uBloxu.
+
+Nejjednodušší je nastavit ji v souboru `.env`, pak se server spouští normálně.
+Přes proměnnou prostředí se to liší podle shellu:
+
+```bash
+# bash
+GNSS_SIMULATE=1 uvicorn app.main:app --port 8080
+```
+
+```powershell
+# PowerShell - nemá zápis proměnné před příkazem
+$env:GNSS_SIMULATE = "1"
+uvicorn app.main:app --port 8080
+```
+
+### Testovací klient
+
+Místo aplikace jde použít jednoduchý klient v `tools/ws_client.py`. Vypisuje
+přijaté NMEA věty a co se do něj napíše, pošle jako korekci do přijímače.
+
+```bash
+python tools/ws_client.py                 # ws://127.0.0.1:8080
+python tools/ws_client.py 192.168.1.42     # server na Raspberry Pi
+```
+
+### Chování WebSocketu
+
+- Endpoint je na kořeni (`ws://<ip>:8080`), aplikace se tedy nemusí měnit.
+  Stejný most běží i na `/ws`, což se hodí při testování.
+- Nahoru jdou celé NMEA věty jako textové rámce. Binární UBX data se do
+  WebSocketu neposílají, ta se ukládají až při statickém měření.
+- Dolů jdou korekce, textové i binární rámce se zapisují rovnou do přijímače.
+- Připojený smí být jen jeden klient. Druhý dostane při handshaku HTTP 403.
+- Uvicorn sám posílá ping rámce, takže tiše odpojený klient uvolní slot
+  i bez korektního zavření spojení.
+
+### Discovery přes UDP
+
+Raspberry Pi se připojuje k hotspotu telefonu jako klient, takže aplikace
+předem nezná jeho adresu. Server proto jednou za sekundu rozešle svoji IP jako
+text na broadcast adresu podsítě, port 41234. Formát je stejný jako u Node
+verze, aplikace se tedy měnit nemusí.
+
+Vysílání běží jen když není nikdo připojený. Jakmile se klient připojí přes
+WebSocket, beacon se zastaví, a po odpojení se zase rozběhne.
+
+Rozhraní se bere z `WIFI_INTERFACE` (výchozí `wlan0`). Když takové rozhraní
+nemá IPv4 adresu, což je běžné při vývoji na Windows, použije se rozhraní s
+výchozí cestou.
+
+Poslech beaconu bez aplikace:
+
+```bash
+python tools/udp_listen.py
+```
+
+Stav a ruční ovládání je na `/discovery/status`, `/discovery/start` a
+`/discovery/stop`.
+
+### Nastavení zpráv přijímače
+
+Přijímač si drží vlastní nastavení, co a jak často posílá. Po resetu nebo po
+výměně kusu se tedy může tiše změnit, co do serveru přichází. Proto se dají
+rychlosti zpráv nastavit v `.env` a server je pošle vždy, když otevře port.
+
+```
+UBX_MESSAGE_RATES=NMEA-GGA:1,NMEA-RMC:1,NMEA-GSV:0,RXM-RAWX:1,RXM-SFRBX:1
+UBX_GENERATION=gen9
+UBX_PORT=UART1
+```
+
+Číslo za dvojtečkou je perioda v počtu navigačních řešení, nula zprávu vypne.
+Prázdná hodnota znamená, že se nastavení přijímače nechá být.
+
+`UBX_GENERATION` rozlišuje protokol. ZED-F9P je `gen9` a nastavuje se přes
+CFG-VALSET, starší u-blox 8 je `gen8` a používá CFG-MSG. `UBX_PORT` říká, ze
+kterého portu přijímače mají zprávy chodit, přes GPIO piny je to `UART1`.
+
+Server po každém příkazu čeká na potvrzení od přijímače. Co přijímač potvrdil
+a co odmítl, je vidět v odpovědi `POST /gnss/messages/apply`, takže špatné
+nastavení nezůstane bez povšimnutí.
+
+`UBX_SAVE_TO_FLASH=1` uloží nastavení i do flash přijímače, přežije pak reset.
+
+Pro statické zpracování jsou potřeba `RXM-RAWX` a `RXM-SFRBX`, tedy fázová
+měření. ZED-F9P je umí, běžná M8N ne.
+
+### NMEA a UBX naráz
+
+Přijímač posílá NMEA věty i binární UBX zprávy jedním portem, promíchané za
+sebou. Server je rozdělí sám:
+
+- do WebSocketu jdou jen celé NMEA věty jako text
+- do souboru `.ubx` při statickém měření jde celý tok bez úprav, tedy i UBX
+
+Není tedy potřeba nic přepínat, obojí může běžet současně.
+
+### Statické měření
+
+Statické měření zapisuje surový tok z přijímače na disk, tedy i binární UBX
+zprávy, aby se dal záznam později zpracovat. Běží nezávisle na WebSocketu,
+takže aplikace může dál dostávat NMEA i během měření.
+
+```
+POST /static/start?point_id=B1    spustí zápis bodu B1
+POST /static/stop                 ukončí zápis
+GET  /static/status               stav a počet zapsaných bajtů
+```
+
+Jeden bod je jedna dvojice souborů v `LOCAL_DATA_PATH`:
+
+- `B1.ubx` je surový tok bajt po bajtu, jak přišel z přijímače
+- `B1.json` obsahuje časy začátku a konce, délku a nastavení portu
+
+Když se stejný bod měří znovu, starší záznam zůstává a k novému se přidá
+číslo: `B1.ubx`, `B1_1.ubx`, `B1_2.ubx` a tak dál. Žádné měření se nepřepíše.
+
+Název souboru vychází z `point_id`. Diakritika se převádí na ASCII, mezery a
+ostatní znaky na podtržítko, takže z `Bod č. 12` je `Bod_c._12.ubx`.
+
+```
+GET    /points                          seznam bodů
+GET    /points/{bod}                     soubory jednoho bodu
+DELETE /points/{bod}                     smazání
+POST   /points/{bod}/download            kopie na flash disk
+POST   /points/{bod}/download?cleanup=true   kopie a smazání lokální kopie
+```
+
+Zapisuje se nejdřív na lokální disk, na flash disk se kopíruje až na vyžádání.
+Odpojený nebo chybějící flash disk tak nemůže rozbít probíhající měření.
+Flash disk se hledá v `BASE_USB_PATH`, použije se první připojené zařízení,
+na Raspberry Pi to bývá `/media/pi`.
+
+Soubor se průběžně ukládá jednou za pět sekund, výpadek napájení tedy může
+přijít nanejvýš o posledních pět sekund záznamu.
+
+### Připojení k WiFi
+
+Na Raspberry Pi se o WiFi stará NetworkManager, server mu jen zapíše profily a
+hlídá, jestli spojení drží. Díky tomu se Pi připojí samo i ve chvíli, kdy
+server neběží.
+
+V `.env`:
+
+```
+WIFI_MANAGED=1
+WIFI_SSID=hotspot-telefonu
+WIFI_PASSWORD=heslo
+WIFI_PRIORITY=20
+WIFI_FALLBACK_SSID=domaci-wifi
+WIFI_FALLBACK_PASSWORD=heslo
+WIFI_FALLBACK_PRIORITY=10
+```
+
+Hotspot má vyšší prioritu, takže se na něj Pi připojí, jakmile je v dosahu.
+Když hotspot není, spadne to na záložní síť a Pi zůstane dostupné přes SSH.
+Hesla patří do `.env`, které je v `.gitignore`, ne do kódu.
+
+Stav je na `GET /wifi/status`, ruční zásah na `POST /wifi/connect` a zápis
+profilů na `POST /wifi/apply`.
+
+## Nasazení na Raspberry Pi
+
+Server běží jako služba pod systemd, ne v Dockeru. Sériový port, připojování
+flash disku a ovládání NetworkManageru jsou věci, které se z kontejneru dělají
+špatně, a jde o jednu aplikaci na jednom stroji.
+
+```bash
+git clone <repo> /home/pi/GNSSApp
+cd /home/pi/GNSSApp
+sudo bash deploy/install.sh
+```
+
+Skript vytvoří venv, nainstaluje závislosti, zapíše službu do systemd, povolí
+ji při startu a spustí ji.
+
+Před prvním ostrým během je potřeba vyplnit `.env`, hlavně `SERIAL_PATH`,
+`SERIAL_BAUDRATE` a přihlašovací údaje k WiFi.
+
+```bash
+systemctl status k155-gnss      # stav
+journalctl -u k155-gnss -f      # živý log
+systemctl restart k155-gnss     # restart po změně .env
+```
+
+Služba se sama restartuje po pádu i po čistém ukončení, s pěti sekundami mezi
+pokusy. Nahrazuje to řádek `@reboot ... &` v crontabu.
+
+Pro čtení sériového portu potřebuje služba práva, proto běží pod rootem.
+Alternativou je přidat uživatele do skupiny `dialout` a `User=pi` v souboru
+`deploy/k155-gnss.service`.
+
+## Legacy Node.js server
+
 Ve složce code je k nalezení kód pro server a pro ukázkového klienta.
 V historii repositáře existuje verze pro uzavřené testování komunikace, momentálně je zdejší server kompatibilní s aplikací, ne tímto klientem.
 
