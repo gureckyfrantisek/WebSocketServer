@@ -59,24 +59,10 @@ SERVER_PORT = _env_int("SERVER_PORT", 8080)
 #   lines  only complete NMEA sentences, binary UBX filtered out
 WS_FRAMING = _env_str("WS_FRAMING", "raw")
 
-# WiFi, managed through NetworkManager on the Raspberry Pi.
-# Credentials belong in .env, never in the code or in git.
-WIFI_MANAGED = _env_bool("WIFI_MANAGED", False)
-WIFI_SSID = _env_str("WIFI_SSID", "")
-WIFI_PASSWORD = _env_str("WIFI_PASSWORD", "")
-WIFI_PRIORITY = _env_int("WIFI_PRIORITY", 20)
-
-# Second network the Pi falls back to, keeps it reachable when the hotspot
-# is not around
-WIFI_FALLBACK_SSID = _env_str("WIFI_FALLBACK_SSID", "")
-WIFI_FALLBACK_PASSWORD = _env_str("WIFI_FALLBACK_PASSWORD", "")
-WIFI_FALLBACK_PRIORITY = _env_int("WIFI_FALLBACK_PRIORITY", 10)
-
-WIFI_WATCHDOG_S = _env_float("WIFI_WATCHDOG_S", 15.0)
-
 # Bluetooth handshake. The phone is paired once through Android settings, then
 # hands over the hotspot credentials and receives the address to connect to.
-BLUETOOTH_ENABLED = _env_bool("BLUETOOTH_ENABLED", False)
+# This is the only way the phone finds the Pi.
+BLUETOOTH_ENABLED = _env_bool("BLUETOOTH_ENABLED", True)
 BLUETOOTH_NAME = _env_str("BLUETOOTH_NAME", "K155GNSS")
 BLUETOOTH_CHANNEL = _env_int("BLUETOOTH_CHANNEL", 1)
 
@@ -85,10 +71,7 @@ BLUETOOTH_CHANNEL = _env_int("BLUETOOTH_CHANNEL", 1)
 # device from redirecting the Pi onto another network. Empty disables the check.
 BLUETOOTH_TOKEN = _env_str("BLUETOOTH_TOKEN", "")
 
-# UDP discovery beacon
-DISCOVERY_ENABLED = _env_bool("DISCOVERY_ENABLED", True)
-DISCOVERY_PORT = _env_int("DISCOVERY_PORT", 41234)
-DISCOVERY_INTERVAL_S = _env_float("DISCOVERY_INTERVAL_S", 1.0)
+# Wireless interface NetworkManager is told to use
 WIFI_INTERFACE = _env_str("WIFI_INTERFACE", "wlan0")
 
 # Storage.

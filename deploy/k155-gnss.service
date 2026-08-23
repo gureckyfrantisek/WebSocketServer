@@ -1,7 +1,7 @@
 [Unit]
 Description=K155 GNSS server
 Documentation=https://github.com/DilnaC004/K155GNSSapp
-# The receiver hangs off a serial port and the beacon needs an address
+# The receiver hangs off a serial port, and joining a network needs one
 After=network-online.target
 Wants=network-online.target
 

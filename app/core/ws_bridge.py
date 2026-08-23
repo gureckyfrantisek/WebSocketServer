@@ -13,10 +13,6 @@ QUEUE_LIMIT = 1000
 _session = None
 _lock = threading.Lock()
 
-# Hooks for the UDP discovery beacon, filled in by main
-on_connected = []
-on_disconnected = []
-
 
 def is_connected() -> bool:
     return _session is not None
@@ -69,7 +65,6 @@ def acquire(peer: str, loop, queue) -> bool:
         }
 
     serial_link.subscribe(_on_serial_data)
-    _fire(on_connected)
     return True
 
 
@@ -83,7 +78,6 @@ def release():
         _session = None
 
     serial_link.unsubscribe(_on_serial_data)
-    _fire(on_disconnected)
 
 
 def send_to_receiver(data: bytes) -> bool:
@@ -135,14 +129,6 @@ def _offer(session, queue, sentence: str):
             pass
 
     queue.put_nowait(sentence)
-
-
-def _fire(hooks):
-    for hook in hooks:
-        try:
-            hook()
-        except Exception as e:
-            print(f"Bridge hook failed: {e}")
 
 
 def note_sent(count: int = 1):

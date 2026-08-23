@@ -1,10 +1,10 @@
-# Bluetooth handshake that replaces the UDP discovery beacon.
+# How the phone finds the Pi.
 #
-# The UDP beacon can only work once the Pi is already on the same network as
-# the phone, which it cannot join without credentials. Bluetooth carries those
-# credentials out of band: the phone is paired once through Android settings,
-# then hands over the hotspot name and password and gets back the address to
-# open the WebSocket on.
+# A network beacon cannot solve this on its own: to announce itself the Pi has
+# to already be on the phone hotspot, and it cannot join that without being
+# told the credentials. Bluetooth carries them out of band. The phone is paired
+# once through Android settings, then hands over the hotspot name and password
+# and gets back the address to open the WebSocket on.
 #
 # The link is a classic RFCOMM serial port, the same profile every Bluetooth
 # serial adapter uses, because that is what pairing through system settings
@@ -13,6 +13,7 @@
 import hmac
 import json
 import socket
+import subprocess
 import threading
 
 from app.core import config, wifi
@@ -31,6 +32,8 @@ _state = {
     "enabled": False,
     "listening": False,
     "available": False,
+    "address": None,
+    "name": None,
     "channel": None,
     "peer": None,
     "requests": 0,
@@ -41,6 +44,68 @@ _state = {
 
 def get_state() -> dict:
     return dict(_state)
+
+
+def _bluetoothctl(commands: list):
+    """Runs a short bluetoothctl session.
+
+    Returns:
+        tuple: (success, output)
+    """
+    try:
+        result = subprocess.run(
+            ["bluetoothctl"],
+            input="\n".join(commands) + "\n",
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except FileNotFoundError:
+        return False, "bluetoothctl is not installed"
+    except subprocess.TimeoutExpired:
+        return False, "bluetoothctl timed out"
+
+    return result.returncode == 0, result.stdout
+
+
+def read_adapter() -> dict:
+    """Reads the adapter address and the name the phone will see."""
+    success, output = _bluetoothctl(["show"])
+
+    if not success:
+        return {"address": None, "name": None}
+
+    address = None
+    name = None
+
+    for line in output.splitlines():
+        line = line.strip()
+
+        if line.startswith("Controller "):
+            address = line.split()[1]
+        elif line.startswith("Alias:"):
+            name = line.partition(":")[2].strip()
+        elif line.startswith("Name:") and not name:
+            name = line.partition(":")[2].strip()
+
+    return {"address": address, "name": name}
+
+
+def set_adapter_name(name: str) -> bool:
+    """Names the adapter so the phone shows the configured name.
+
+    Keeps .env as the one place the name is written, instead of it living both
+    there and in whatever argument the setup script was run with.
+    """
+    if not name:
+        return False
+
+    success, output = _bluetoothctl(["power on", f"system-alias {name}"])
+
+    if not success:
+        print(f"Could not name the Bluetooth adapter: {output}")
+
+    return success
 
 
 def is_supported() -> bool:
@@ -175,12 +240,17 @@ def start():
         _server = None
         return
 
+    set_adapter_name(config.BLUETOOTH_NAME)
+
     _state.update({
         "available": True,
         "listening": True,
         "channel": config.BLUETOOTH_CHANNEL,
         "last_error": None,
+        **read_adapter(),
     })
+
+    print(f"Bluetooth adapter {_state['address']} is visible as {_state['name']}")
 
     print(f"Bluetooth handshake listening on RFCOMM channel {config.BLUETOOTH_CHANNEL}")
 

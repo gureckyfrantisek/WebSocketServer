@@ -100,88 +100,6 @@ python tools/ws_client.py 192.168.1.42     # server na Raspberry Pi
 - Uvicorn sám posílá ping rámce, takže tiše odpojený klient uvolní slot
   i bez korektního zavření spojení.
 
-### Discovery přes Bluetooth
-
-UDP beacon má zásadní slabinu: aby Pi mohlo vysílat svoji adresu, musí už být
-na stejné síti jako telefon, jenže na hotspot se bez přihlašovacích údajů
-nepřipojí. Bluetooth tuhle smyčku rozetne, protože údaje přenese mimo síť.
-
-Průběh:
-
-1. Telefon se jednou spáruje s Pi přes systémové nastavení Bluetooth.
-2. Aplikace po spuštění otevře sériové spojení (Serial Port Profile).
-3. Pošle jméno a heslo hotspotu.
-4. Pi se na hotspot připojí a odpoví svojí adresou.
-5. Aplikace se na tu adresu připojí WebSocketem, dál už je vše stejné.
-
-Zprávy jsou jednořádkový JSON, jeden dotaz a jedna odpověď na řádek:
-
-```json
-{"command":"hello"}
-{"command":"status"}
-{"command":"connect_wifi","ssid":"hotspot","password":"heslo"}
-```
-
-Odpověď při úspěchu:
-
-```json
-{"status":"ok","ip":"192.168.43.42","ssid":"hotspot","server_port":8080,
- "ws_url":"ws://192.168.43.42:8080/","api_url":"http://192.168.43.42:8080"}
-```
-
-Nastavení na Raspberry Pi, stačí jednou:
-
-```bash
-sudo bash deploy/bluetooth_setup.sh K155GNSS
-```
-
-Skript pojmenuje adaptér, zapne párování bez PINu, a hlavně zveřejní záznam
-Serial Port Profile. Bez něj telefon nemá jak zjistit, na který kanál se
-připojit. To vyžaduje `bluetoothd` v režimu kompatibility, což skript zařídí
-přes override systemd jednotky.
-
-Pak v `.env`:
-
-```
-BLUETOOTH_ENABLED=1
-BLUETOOTH_NAME=K155GNSS
-BLUETOOTH_CHANNEL=1
-```
-
-Stav je na `GET /bluetooth/status`, ručně se dá spustit a zastavit přes
-`POST /bluetooth/start` a `/bluetooth/stop`.
-
-Obojí může běžet vedle sebe. Dokud aplikace neumí Bluetooth, `DISCOVERY_ENABLED=1`
-nechává UDP beacon funkční. Až Bluetooth zafunguje, dává smysl beacon vypnout.
-
-Heslo k hotspotu jde po spárovaném spoji, který je šifrovaný. Znamená to ale
-také, že jakékoliv spárované zařízení může Pi přikázat, aby se připojilo jinam.
-Pro terénní jednotku je to přijatelné, u citlivějšího nasazení by chtělo přidat
-sdílený token.
-
-### Discovery přes UDP
-
-Raspberry Pi se připojuje k hotspotu telefonu jako klient, takže aplikace
-předem nezná jeho adresu. Server proto jednou za sekundu rozešle svoji IP jako
-text na broadcast adresu podsítě, port 41234. Formát je stejný jako u Node
-verze, aplikace se tedy měnit nemusí.
-
-Vysílání běží jen když není nikdo připojený. Jakmile se klient připojí přes
-WebSocket, beacon se zastaví, a po odpojení se zase rozběhne.
-
-Rozhraní se bere z `WIFI_INTERFACE` (výchozí `wlan0`). Když takové rozhraní
-nemá IPv4 adresu, což je běžné při vývoji na Windows, použije se rozhraní s
-výchozí cestou.
-
-Poslech beaconu bez aplikace:
-
-```bash
-python tools/udp_listen.py
-```
-
-Stav a ruční ovládání je na `/discovery/status`, `/discovery/start` a
-`/discovery/stop`.
-
 ### Nastavení zpráv přijímače
 
 Přijímač si drží vlastní nastavení, co a jak často posílá. Po resetu nebo po
@@ -324,30 +242,82 @@ Chování jde otočit přes `PREFER_USB=0`, pak se zapisuje vždy lokálně.
 Soubor se průběžně ukládá jednou za pět sekund, výpadek napájení tedy může
 přijít nanejvýš o posledních pět sekund záznamu.
 
-### Připojení k WiFi
+### Jak telefon najde Pi
 
-Na Raspberry Pi se o WiFi stará NetworkManager, server mu jen zapíše profily a
-hlídá, jestli spojení drží. Díky tomu se Pi připojí samo i ve chvíli, kdy
+Samotné vysílání adresy po síti tenhle problém vyřešit nemůže: aby Pi mohlo
+svoji adresu oznámit, musí už být na hotspotu telefonu, jenže na ten se bez
+přihlašovacích údajů nepřipojí. Bluetooth to rozetne, protože údaje přenese
+mimo síť.
+
+Průběh:
+
+1. Telefon se jednou spáruje s Pi přes systémové nastavení Bluetooth.
+2. Aplikace po spuštění otevře sériové spojení (Serial Port Profile).
+3. Pošle jméno a heslo hotspotu.
+4. Pi se na hotspot připojí a odpoví svojí adresou.
+5. Aplikace se na tu adresu připojí WebSocketem, dál už je vše stejné.
+
+Zprávy jsou jednořádkový JSON, jeden dotaz a jedna odpověď na řádek:
+
+```json
+{"command":"hello"}
+{"command":"status","token":"..."}
+{"command":"connect_wifi","ssid":"hotspot","password":"heslo","token":"..."}
+```
+
+Odpověď při úspěchu:
+
+```json
+{"status":"ok","ip":"192.168.43.42","ssid":"hotspot","server_port":8080,
+ "ws_url":"ws://192.168.43.42:8080/","api_url":"http://192.168.43.42:8080"}
+```
+
+Nastavení na Raspberry Pi, stačí jednou:
+
+```bash
+sudo bash deploy/bluetooth_setup.sh K155GNSS
+```
+
+Druhým parametrem se dá vyžádat PIN při párování, třeba
+`deploy/bluetooth_setup.sh K155GNSS 483920`. Bez něj se telefon spáruje bez
+ptaní, což je pohodlné, ale spárovat se může kdokoliv v dosahu.
+
+Skript pojmenuje adaptér, nastaví párování a hlavně zveřejní záznam Serial Port
+Profile. Bez něj telefon nemá jak zjistit, na který kanál se připojit. To
+vyžaduje `bluetoothd` v režimu kompatibility, což skript zařídí přes override
+systemd jednotky.
+
+Pak v `.env`:
+
+```
+BLUETOOTH_ENABLED=1
+BLUETOOTH_NAME=K155GNSS
+BLUETOOTH_TOKEN=
+```
+
+Jméno se bere z `.env`, server ho při startu nastaví adaptéru sám, takže je na
+jednom místě. Adresu adaptéru a jméno vrací `GET /bluetooth/status`, ručně se
+dá spustit a zastavit přes `POST /bluetooth/start` a `/bluetooth/stop`.
+
+Párování samo o sobě jen dokazuje, že se telefon někdy spároval. Nezabrání
+spárovanému zařízení přesměrovat Pi na jinou síť. Od toho je `BLUETOOTH_TOKEN`,
+který se kontroluje u každého požadavku. Vygeneruje se třeba přes
+`openssl rand -hex 16`.
+
+### Přihlašovací údaje k WiFi
+
+V konfiguraci projektu žádné nejsou a být nemají. Hotspot přijde přes Bluetooth
+a NetworkManager si profil uloží, takže se Pi příště připojí samo, i když
 server neběží.
 
-V `.env`:
+To znamená, že po prvním připojení k domácí síti nebo k hotspotu zůstává
+zařízení dostupné i bez aplikace, což se hodí pro SSH. Profily se dají
+zkontrolovat přes `nmcli connection show`.
 
 ```
-WIFI_MANAGED=1
-WIFI_SSID=hotspot-telefonu
-WIFI_PASSWORD=heslo
-WIFI_PRIORITY=20
-WIFI_FALLBACK_SSID=domaci-wifi
-WIFI_FALLBACK_PASSWORD=heslo
-WIFI_FALLBACK_PRIORITY=10
+GET  /wifi/status              na jaké síti Pi je
+POST /wifi/connect?ssid=...    připojení k síti, kterou už NetworkManager zná
 ```
-
-Hotspot má vyšší prioritu, takže se na něj Pi připojí, jakmile je v dosahu.
-Když hotspot není, spadne to na záložní síť a Pi zůstane dostupné přes SSH.
-Hesla patří do `.env`, které je v `.gitignore`, ne do kódu.
-
-Stav je na `GET /wifi/status`, ruční zásah na `POST /wifi/connect` a zápis
-profilů na `POST /wifi/apply`.
 
 ## Nasazení na Raspberry Pi
 

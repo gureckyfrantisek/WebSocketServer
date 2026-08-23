@@ -1,8 +1,9 @@
 # Joining the phone hotspot on the Raspberry Pi.
 #
-# NetworkManager does the actual work. The server only makes sure a connection
-# profile exists and nudges it when the link drops, so the Pi still reconnects
-# on its own even while this server is not running.
+# The credentials arrive over Bluetooth, they are never stored in this project.
+# NetworkManager does the actual work and keeps the profile afterwards, so the
+# Pi reconnects to a hotspot it has already seen on its own, with no help from
+# this server and even while it is not running.
 import subprocess
 import threading
 import time
@@ -12,11 +13,11 @@ from app.core import config
 # How long a single nmcli call may take before it is given up on
 COMMAND_TIMEOUT_S = 30
 
-_thread: threading.Thread = None
-_stop_event: threading.Event = None
+# Autoconnect priority given to a hotspot handed over by the phone, above the
+# default so it wins over any network the Pi happens to also know
+HOTSPOT_PRIORITY = 20
 
 _state = {
-    "managed": False,
     "available": False,
     "connected": False,
     "ssid": None,
@@ -168,32 +169,7 @@ def connect(ssid: str) -> bool:
     return True
 
 
-def apply_profiles() -> dict:
-    """Writes the configured networks into NetworkManager.
-
-    The hotspot gets the higher priority, the fallback network keeps the Pi
-    reachable over SSH when the hotspot is not around.
-    """
-    result = {"configured": [], "failed": []}
-
-    networks = [
-        (config.WIFI_SSID, config.WIFI_PASSWORD, config.WIFI_PRIORITY),
-        (config.WIFI_FALLBACK_SSID, config.WIFI_FALLBACK_PASSWORD, config.WIFI_FALLBACK_PRIORITY),
-    ]
-
-    for ssid, password, priority in networks:
-        if not ssid:
-            continue
-
-        if ensure_profile(ssid, password, priority):
-            result["configured"].append(f"{ssid} (priority {priority})")
-        else:
-            result["failed"].append(ssid)
-
-    return result
-
-
-def join(ssid: str, password: str, priority=None, timeout_s=30.0) -> dict:
+def join(ssid: str, password: str, priority=HOTSPOT_PRIORITY, timeout_s=30.0) -> dict:
     """Joins a network given fresh credentials and waits for an address.
 
     Used by the Bluetooth handshake, where the phone hands over its hotspot
@@ -208,9 +184,6 @@ def join(ssid: str, password: str, priority=None, timeout_s=30.0) -> dict:
     Returns:
         dict: State with an "ip" once the link is up, plus "error" on failure
     """
-    if priority is None:
-        priority = config.WIFI_PRIORITY
-
     if not is_available():
         return {"error": "nmcli is not installed"}
 
@@ -232,47 +205,3 @@ def join(ssid: str, password: str, priority=None, timeout_s=30.0) -> dict:
         time.sleep(1.0)
 
     return {"error": "connected but no address was assigned", **dict(_state)}
-
-
-# --- Watchdog ----------------------------------------------------------------
-
-def start_watchdog():
-    """Watches the link and nudges NetworkManager when it stays down."""
-    global _thread, _stop_event
-
-    _state["managed"] = True
-
-    if not is_available():
-        _state["last_error"] = "nmcli is not installed"
-        print("WiFi management skipped, nmcli is not installed")
-        return
-
-    apply_profiles()
-
-    _stop_event = threading.Event()
-
-    def _watch():
-        while not _stop_event.is_set():
-            refresh_state()
-
-            if not _state["connected"] and config.WIFI_SSID:
-                print("WiFi is down, trying the configured networks")
-                if not connect(config.WIFI_SSID) and config.WIFI_FALLBACK_SSID:
-                    connect(config.WIFI_FALLBACK_SSID)
-
-            _stop_event.wait(config.WIFI_WATCHDOG_S)
-
-    _thread = threading.Thread(target=_watch, daemon=True)
-    _thread.start()
-
-
-def stop_watchdog():
-    global _thread, _stop_event
-
-    if _stop_event:
-        _stop_event.set()
-    if _thread:
-        _thread.join(timeout=2.0)
-        _thread = None
-
-    _state["managed"] = False

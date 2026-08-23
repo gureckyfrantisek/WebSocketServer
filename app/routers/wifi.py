@@ -16,39 +16,14 @@ def get_wifi_status_route():
     )
 
 
-@router.post("/apply")
-def apply_profiles_route():
-    """Writes the configured networks into NetworkManager."""
-    if not wifi.is_available():
-        return responses.JSONResponse(
-            status_code=503,
-            content={"status": "nmcli is not installed"},
-        )
-
-    result = wifi.apply_profiles()
-
-    if result["failed"]:
-        return responses.JSONResponse(
-            status_code=500,
-            content={"status": "some profiles could not be written", **result},
-        )
-
-    return responses.JSONResponse(
-        status_code=200,
-        content={"status": "applied", **result},
-    )
-
-
 @router.post("/connect")
-def connect_route(ssid: str = ""):
-    """Connects now instead of waiting for the watchdog."""
-    target = ssid or config.WIFI_SSID
+def connect_route(ssid: str):
+    """Brings up a network NetworkManager already knows.
 
-    if not target:
-        return responses.JSONResponse(
-            status_code=400,
-            content={"status": "no network configured"},
-        )
+    New networks arrive through the Bluetooth handshake, this is for bringing
+    back one the Pi has joined before.
+    """
+    target = ssid
 
     if not wifi.connect(target):
         return responses.JSONResponse(
