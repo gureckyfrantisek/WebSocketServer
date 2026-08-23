@@ -34,6 +34,9 @@ _state = {
     "available": False,
     "address": None,
     "name": None,
+    "powered": False,
+    "discoverable": False,
+    "serial_profile": False,
     "channel": None,
     "peer": None,
     "requests": 0,
@@ -69,43 +72,84 @@ def _bluetoothctl(commands: list):
 
 
 def read_adapter() -> dict:
-    """Reads the adapter address and the name the phone will see."""
+    """Reads what state the adapter is actually in.
+
+    A socket binds happily on a powered down adapter, so listening on a channel
+    proves nothing by itself. These are the values that decide whether a phone
+    can see the Pi at all.
+    """
+    empty = {
+        "address": None,
+        "name": None,
+        "powered": False,
+        "discoverable": False,
+    }
+
     success, output = _bluetoothctl(["show"])
 
     if not success:
-        return {"address": None, "name": None}
+        return empty
 
-    address = None
-    name = None
+    state = dict(empty)
 
     for line in output.splitlines():
         line = line.strip()
 
         if line.startswith("Controller "):
-            address = line.split()[1]
+            state["address"] = line.split()[1]
         elif line.startswith("Alias:"):
-            name = line.partition(":")[2].strip()
-        elif line.startswith("Name:") and not name:
-            name = line.partition(":")[2].strip()
+            state["name"] = line.partition(":")[2].strip()
+        elif line.startswith("Name:") and not state["name"]:
+            state["name"] = line.partition(":")[2].strip()
+        elif line.startswith("Powered:"):
+            state["powered"] = line.partition(":")[2].strip() == "yes"
+        elif line.startswith("Discoverable:"):
+            state["discoverable"] = line.partition(":")[2].strip() == "yes"
 
-    return {"address": address, "name": name}
+    return state
 
 
-def set_adapter_name(name: str) -> bool:
-    """Names the adapter so the phone shows the configured name.
+def has_serial_profile() -> bool:
+    """Whether a Serial Port record is published.
 
-    Keeps .env as the one place the name is written, instead of it living both
-    there and in whatever argument the setup script was run with.
+    Without it the phone has no way to learn which channel to open, however
+    healthy the socket on this side looks.
     """
-    if not name:
+    try:
+        result = subprocess.run(
+            ["sdptool", "browse", "local"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
         return False
 
-    success, output = _bluetoothctl(["power on", f"system-alias {name}"])
+    return "Serial Port" in result.stdout
+
+
+def prepare_adapter(name: str) -> dict:
+    """Powers the adapter up, names it and keeps it discoverable.
+
+    Discoverability normally expires after three minutes, which is no use to a
+    unit sitting in a field, so the timeout is turned off.
+    """
+    commands = ["power on", "pairable on", "discoverable-timeout 0", "discoverable on"]
+
+    if name:
+        commands.insert(1, f"system-alias {name}")
+
+    success, output = _bluetoothctl(commands)
 
     if not success:
-        print(f"Could not name the Bluetooth adapter: {output}")
+        print(f"Could not prepare the Bluetooth adapter: {output}")
 
-    return success
+    state = read_adapter()
+
+    if not state["powered"]:
+        print("The Bluetooth adapter is powered down, the phone cannot see the Pi")
+    elif not state["discoverable"]:
+        print("The Bluetooth adapter is not discoverable, pairing will not work")
+
+    return state
 
 
 def is_supported() -> bool:
@@ -240,17 +284,22 @@ def start():
         _server = None
         return
 
-    set_adapter_name(config.BLUETOOTH_NAME)
+    adapter = prepare_adapter(config.BLUETOOTH_NAME)
 
     _state.update({
         "available": True,
         "listening": True,
         "channel": config.BLUETOOTH_CHANNEL,
         "last_error": None,
-        **read_adapter(),
+        "serial_profile": has_serial_profile(),
+        **adapter,
     })
 
-    print(f"Bluetooth adapter {_state['address']} is visible as {_state['name']}")
+    if not _state["serial_profile"]:
+        print("No Serial Port record is published, run deploy/bluetooth_setup.sh")
+
+    print(f"Bluetooth adapter {_state['address']} is visible as {_state['name']}, "
+          f"powered {_state['powered']}, discoverable {_state['discoverable']}")
 
     print(f"Bluetooth handshake listening on RFCOMM channel {config.BLUETOOTH_CHANNEL}")
 

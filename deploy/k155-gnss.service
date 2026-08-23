@@ -1,9 +1,10 @@
 [Unit]
 Description=K155 GNSS server
 Documentation=https://github.com/DilnaC004/K155GNSSapp
-# The receiver hangs off a serial port, and joining a network needs one
-After=network-online.target
-Wants=network-online.target
+# The receiver hangs off a serial port, and joining a network needs one.
+# The phone finds the Pi over Bluetooth, so that stack has to be up first.
+After=network-online.target bluetooth.service
+Wants=network-online.target bluetooth.service
 
 [Service]
 Type=exec

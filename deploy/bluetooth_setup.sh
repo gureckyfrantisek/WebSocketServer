@@ -50,6 +50,35 @@ EOF
     sleep 2
 fi
 
+# --- Adapter powers up at boot -----------------------------------------------
+
+# Without this the radio comes up powered down after a reboot, and a socket
+# still binds happily on a powered down adapter, so nothing looks wrong until a
+# phone tries to find the Pi and cannot.
+MAIN_CONF="/etc/bluetooth/main.conf"
+
+if [ -f "$MAIN_CONF" ]; then
+    echo "Making the adapter power up at boot"
+
+    if grep -q '^\s*#\?\s*AutoEnable' "$MAIN_CONF"; then
+        sed -i 's/^\s*#\?\s*AutoEnable.*/AutoEnable=true/' "$MAIN_CONF"
+    elif grep -q '^\[Policy\]' "$MAIN_CONF"; then
+        sed -i '/^\[Policy\]/a AutoEnable=true' "$MAIN_CONF"
+    else
+        printf '\n[Policy]\nAutoEnable=true\n' >> "$MAIN_CONF"
+    fi
+
+    # Discoverability otherwise expires after three minutes
+    if grep -q '^\s*#\?\s*DiscoverableTimeout' "$MAIN_CONF"; then
+        sed -i 's/^\s*#\?\s*DiscoverableTimeout.*/DiscoverableTimeout = 0/' "$MAIN_CONF"
+    else
+        sed -i '/^\[General\]/a DiscoverableTimeout = 0' "$MAIN_CONF"
+    fi
+
+    systemctl restart bluetooth
+    sleep 2
+fi
+
 # --- Pairing agent -----------------------------------------------------------
 
 if [ -n "$PIN" ]; then
@@ -96,11 +125,15 @@ echo "Naming the adapter and making it discoverable"
 bluetoothctl <<EOF
 power on
 system-alias $NAME
-discoverable on
 pairable on
+discoverable-timeout 0
+discoverable on
 agent $AGENT_MODE
 default-agent
 EOF
+
+echo "Adapter state:"
+bluetoothctl show | grep -E "Alias|Powered|Discoverable:"
 
 # Discoverability normally times out after three minutes. A field unit has
 # nobody around to press a button, so it stays discoverable.
