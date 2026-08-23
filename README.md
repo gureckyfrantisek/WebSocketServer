@@ -173,10 +173,58 @@ POST /static/stop                 ukončí zápis
 GET  /static/status               stav a počet zapsaných bajtů
 ```
 
+Kromě `point_id` přijímá start ještě tři nepovinné parametry, které vyplňuje
+měřič v aplikaci:
+
+```
+POST /static/start?point_id=1&antenna_height=1.85&antenna_offset=0.042&code=roh
+```
+
+- `antenna_height` je výška antény nad měřeným bodem v metrech
+- `antenna_offset` je posun fázového centra antény v metrech, vlastnost
+  konkrétního kusu hardwaru
+- `code` je volný kód bodu, třeba `roh` nebo `sloup`, diakritika je v pořádku
+
+Obě čísla se dají zadat s desetinnou čárkou i tečkou, protože česká klávesnice
+nabízí čárku. Nečíselná hodnota vrátí `400 {"status": "unusable antenna height"}`
+a měření se vůbec nespustí. Vynechaný parametr není chyba, server běží dál i s
+klientem, který posílá jen `point_id`.
+
+Výška a posun se schválně ukládají zvlášť a nesčítají se. Při zpracování se
+z jejich součtu skládá svislá složka hlavičky `ANTENNA: DELTA H/E/N` v RINEXu a
+`code` se hodí do `MARKER NAME`, ale ten, kdo data zpracovává, má takhle vidět
+obě části zvlášť.
+
 Jeden bod je jedna dvojice souborů v `LOCAL_DATA_PATH`:
 
 - `B1.ubx` je surový tok bajt po bajtu, jak přišel z přijímače
-- `B1.json` obsahuje časy začátku a konce, délku a nastavení portu
+- `B1.json` obsahuje časy začátku a konce, délku, nastavení portu a údaje
+  o anténě
+
+Do `.ubx` se nikdy nic nepřidává, musí zůstat přesnou kopií toho, co poslal
+přijímač, jinak by ho nástroje pro zpracování nepřečetly. Všechno ostatní patří
+do `.json`:
+
+```json
+{
+  "point_id": "1",
+  "antenna_height": 1.85,
+  "antenna_offset": 0.042,
+  "code": "roh",
+  "file_name": "1",
+  "location": "usb",
+  "start_ns": 1787498406808436100,
+  "end_ns": 1787498407426368100,
+  "duration_s": 61.4,
+  "bytes_written": 812340,
+  "raw_file": "1.ubx"
+}
+```
+
+Když měřič pole nevyplní, zapíše se `null`, klíč ale ve výsledku zůstane, aby
+se na tvar souboru dalo při zpracování spolehnout. Stejné tři údaje vrací i
+`GET /static/status` a odpověď na `POST /static/stop`, takže aplikace umí
+ukázat, s čím bylo běžící měření spuštěné, i když se připojí až po restartu.
 
 Když se stejný bod měří znovu, starší záznam zůstává a k novému se přidá
 číslo: `B1.ubx`, `B1_1.ubx`, `B1_2.ubx` a tak dál. Žádné měření se nepřepíše.

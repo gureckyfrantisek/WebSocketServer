@@ -15,9 +15,19 @@ def get_static_status_route():
 
 
 @router.post("/start")
-def start_static_route(point_id: str):
-    """Records one surveyed point, the point id names the files."""
-    response = static_session.start(point_id)
+def start_static_route(
+    point_id: str,
+    antenna_height: str = "",
+    antenna_offset: str = "",
+    code: str = "",
+):
+    """Records one surveyed point, the point id names the files.
+
+    The antenna figures and the code are optional, the app leaves them out when
+    the surveyor left the field empty. They are taken as text because a Czech
+    keyboard produces a comma decimal separator.
+    """
+    response = static_session.start(point_id, antenna_height, antenna_offset, code)
 
     if response is True:
         return responses.JSONResponse(
@@ -41,6 +51,12 @@ def start_static_route(point_id: str):
         return responses.JSONResponse(
             status_code=400,
             content={"status": "unusable point id"},
+        )
+
+    if response == 5:
+        return responses.JSONResponse(
+            status_code=400,
+            content={"status": "unusable antenna height"},
         )
 
     return responses.JSONResponse(

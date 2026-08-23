@@ -21,6 +21,33 @@ def is_recording() -> bool:
     return _session is not None
 
 
+def parse_number(text):
+    """Reads a decimal the surveyor typed on a phone.
+
+    A Czech keyboard produces a comma as readily as a full stop, so both are
+    accepted.
+
+    Parameters:
+        text (string): The value as it arrived, empty when the field was blank
+
+    Returns:
+        tuple: (value, ok). The value is None for a blank field, which is not
+        an error, and ok is False only for something that is not a number.
+    """
+    if text is None:
+        return None, True
+
+    text = str(text).strip()
+
+    if not text:
+        return None, True
+
+    try:
+        return float(text.replace(",", ".")), True
+    except ValueError:
+        return None, False
+
+
 def get_state() -> dict:
     """Diagnostics for the status endpoints."""
     session = _session
@@ -31,6 +58,9 @@ def get_state() -> dict:
     return {
         "recording": True,
         "point_id": session["point_id"],
+        "antenna_height": session["antenna_height"],
+        "antenna_offset": session["antenna_offset"],
+        "code": session["code"],
         "location": session["location"],
         "start_ns": session["start_ns"],
         "bytes_written": session["bytes_written"],
@@ -39,15 +69,24 @@ def get_state() -> dict:
     }
 
 
-def start(point_id: str):
+def start(point_id: str, antenna_height=None, antenna_offset=None, code=None):
     """Begins writing the raw receiver stream to disk.
+
+    The antenna figures and the code are not written into the recording itself,
+    which has to stay a byte exact copy of the receiver stream. They go into
+    the metadata file beside it, where post-processing picks them up for the
+    RINEX header.
 
     Parameters:
         point_id (string): Names the files, one pair per surveyed point
+        antenna_height (string): Height of the antenna above the point, metres
+        antenna_offset (string): Phase centre offset of the antenna, metres
+        code (string): Free text point code the surveyor typed
 
     Returns:
         True on success, 1 already recording, 2 receiver not connected,
-        3 file could not be opened, 4 unusable point id
+        3 file could not be opened, 4 unusable point id,
+        5 an antenna figure that is not a number
     """
     global _session
 
@@ -55,6 +94,14 @@ def start(point_id: str):
 
     if not safe_point:
         return 4
+
+    height, height_ok = parse_number(antenna_height)
+    offset, offset_ok = parse_number(antenna_offset)
+
+    if not height_ok or not offset_ok:
+        return 5
+
+    code = str(code).strip() if code is not None and str(code).strip() else None
 
     with _lock:
         if _session is not None:
@@ -79,6 +126,9 @@ def start(point_id: str):
 
         _session = {
             "point_id": point_id,
+            "antenna_height": height,
+            "antenna_offset": offset,
+            "code": code,
             "file_name": file_name,
             "location": location,
             "folder": folder,
@@ -131,6 +181,9 @@ def stop():
 
     return {
         "point_id": session["point_id"],
+        "antenna_height": session["antenna_height"],
+        "antenna_offset": session["antenna_offset"],
+        "code": session["code"],
         "file_name": session["file_name"],
         "location": session["location"],
         "start_ns": session["start_ns"],
@@ -171,6 +224,11 @@ def _write_metadata(session, finished: bool):
 
     metadata = {
         "point_id": session["point_id"],
+        # Always present, null when the surveyor left the field empty, so a
+        # post-processing script can count on the shape
+        "antenna_height": session["antenna_height"],
+        "antenna_offset": session["antenna_offset"],
+        "code": session["code"],
         "file_name": session["file_name"],
         "location": session["location"],
         "start_ns": session["start_ns"],
@@ -189,7 +247,7 @@ def _write_metadata(session, finished: bool):
     meta_path = session["meta_path"]
 
     try:
-        with open(meta_path, "w") as file:
-            json.dump(metadata, file, indent=2)
+        with open(meta_path, "w", encoding="utf-8") as file:
+            json.dump(metadata, file, indent=2, ensure_ascii=False)
     except Exception as e:
         print(f"Could not write the metadata file: {e}")
