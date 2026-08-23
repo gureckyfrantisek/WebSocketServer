@@ -325,22 +325,65 @@ Server běží jako služba pod systemd, ne v Dockeru. Sériový port, připojov
 flash disku a ovládání NetworkManageru jsou věci, které se z kontejneru dělají
 špatně, a jde o jednu aplikaci na jednom stroji.
 
+### Předpoklady
+
+Sériový port na Raspberry Pi je ve výchozím stavu obsazený přihlašovací
+konzolí, se kterou by se přijímač o port přetahoval:
+
 ```bash
-git clone <repo> /home/pi/GNSSApp
-cd /home/pi/GNSSApp
+sudo raspi-config
+```
+
+Interface Options → Serial Port → přihlašovací shell **ne** → hardware serial
+**ano**, pak restart. Potom `/dev/serial0` patří přijímači.
+
+### Instalace
+
+```bash
+git clone https://github.com/gureckyfrantisek/WebSocketServer /home/pi/WebSocketServer
+cd /home/pi/WebSocketServer
 sudo bash deploy/install.sh
 ```
 
-Skript vytvoří venv, nainstaluje závislosti, zapíše službu do systemd, povolí
-ji při startu a spustí ji.
+Skript vytvoří venv, nainstaluje závislosti, připraví Bluetooth, zapíše službu
+do systemd, povolí ji při startu a spustí ji. Dá se pouštět opakovaně, třeba po
+`git pull`, existující `.env` nechá být.
 
-Před prvním ostrým během je potřeba vyplnit `.env`, hlavně `SERIAL_PATH`,
-`SERIAL_BAUDRATE` a přihlašovací údaje k WiFi.
+Bluetooth krok je součástí instalace schválně. Telefon nemá jinou cestu, jak Pi
+najít, takže server bez připraveného Bluetooth je server, ke kterému se nikdo
+nepřipojí. Přeskočí se jen když je v `.env` `BLUETOOTH_ENABLED=0`.
+
+Pokud má párování vyžadovat PIN, spustí se příprava Bluetooth zvlášť:
+
+```bash
+sudo bash deploy/bluetooth_setup.sh K155GNSS 483920
+```
+
+Před prvním ostrým během je potřeba projít `.env`, hlavně `SERIAL_PATH` a
+`SERIAL_BAUDRATE`. Přihlašovací údaje k WiFi se nikam nepíšou, ty přijdou z
+telefonu přes Bluetooth.
+
+### Provoz
 
 ```bash
 systemctl status k155-gnss      # stav
 journalctl -u k155-gnss -f      # živý log
 systemctl restart k155-gnss     # restart po změně .env
+```
+
+Kontrola, že se server chytil:
+
+```bash
+curl -s localhost:8080/status | python3 -m json.tool
+curl -s localhost:8080/bluetooth/status | python3 -m json.tool
+```
+
+V odpovědi Bluetooth mají být `powered`, `discoverable` i `serial_profile` na
+`true`. Když je `powered` na `false`, bývá adaptér blokovaný přes rfkill:
+
+```bash
+rfkill list
+sudo rfkill unblock bluetooth
 ```
 
 Služba se sama restartuje po pádu i po čistém ukončení, s pěti sekundami mezi
