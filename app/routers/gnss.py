@@ -1,7 +1,7 @@
 # The /gnss endpoints
 from fastapi import APIRouter, Body, responses
 
-from app.core import config, serial_link, ublox
+from app.core import config, inspect as gnss_inspect, serial_link, ublox
 
 router = APIRouter()
 
@@ -79,4 +79,34 @@ def apply_messages_route():
     return responses.JSONResponse(
         status_code=200,
         content={"status": "applied", **result},
+    )
+
+
+@router.get("/sample")
+def sample_route(seconds: float = 2.0):
+    """Listens to the receiver for a moment and reports what it is sending."""
+    seconds = max(0.1, min(seconds, 10.0))
+
+    result = gnss_inspect.sample(seconds)
+
+    if "error" in result:
+        return responses.JSONResponse(status_code=503, content=result)
+
+    return responses.JSONResponse(status_code=200, content=result)
+
+
+@router.post("/protocols/enable")
+def enable_protocols_route():
+    """Switches UBX, NMEA and RTCM3 on for both directions of the port."""
+    result = ublox.enable_protocols()
+
+    if result["rejected"] or result["failed"]:
+        return responses.JSONResponse(
+            status_code=503,
+            content={"status": "the receiver did not accept every protocol", **result},
+        )
+
+    return responses.JSONResponse(
+        status_code=200,
+        content={"status": "enabled", **result},
     )

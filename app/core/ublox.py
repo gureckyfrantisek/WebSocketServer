@@ -66,6 +66,24 @@ PORT_OFFSETS = {
     "SPI": 4,
 }
 
+# Generation 9 keys switching whole protocols on and off, per port.
+# Without RTCM3X on the input the receiver answers corrections with
+# "unknown msg", and without NMEA on the output no position sentences appear.
+PROTOCOL_KEYS = {
+    "UART1": {"in": 0x10730000, "out": 0x10740000},
+    "UART2": {"in": 0x10750000, "out": 0x10760000},
+    "USB": {"in": 0x10770000, "out": 0x10780000},
+    "I2C": {"in": 0x10710000, "out": 0x10720000},
+    "SPI": {"in": 0x10790000, "out": 0x107A0000},
+}
+
+# Offset of each protocol inside those groups
+PROTOCOL_OFFSETS = {
+    "UBX": 0x01,
+    "NMEA": 0x02,
+    "RTCM3X": 0x04,
+}
+
 # Where the setting is stored on a generation 9 receiver
 LAYER_RAM = 0x01
 LAYER_BBR = 0x02
@@ -114,6 +132,57 @@ def get_key(name: str) -> int:
         return 0
 
     return MSGOUT_I2C_KEYS[name] + PORT_OFFSETS[port]
+
+
+def enable_protocols(protocols=("UBX", "NMEA", "RTCM3X")) -> dict:
+    """Switches input and output protocols on for the configured port.
+
+    A receiver with RTCM3X disabled on the input answers every correction with
+    an "unknown msg" notice instead of using it, and one with NMEA disabled on
+    the output sends no position sentences at all.
+
+    Returns:
+        dict: What the receiver acknowledged and what it rejected
+    """
+    port = config.UBX_PORT.upper()
+
+    result = {"port": port, "applied": [], "rejected": [], "failed": []}
+
+    if port not in PROTOCOL_KEYS:
+        result["failed"] = list(protocols)
+        return result
+
+    if not serial_link.verify_connection():
+        result["failed"] = list(protocols)
+        print("Cannot set protocols, the receiver is not connected")
+        return result
+
+    layers = LAYER_RAM | (LAYER_FLASH if config.UBX_SAVE_TO_FLASH else 0)
+
+    for direction in ("in", "out"):
+        group = PROTOCOL_KEYS[port][direction]
+
+        for name in protocols:
+            if name not in PROTOCOL_OFFSETS:
+                result["failed"].append(name)
+                continue
+
+            key = group + PROTOCOL_OFFSETS[name]
+            label = f"{direction} {name}"
+
+            if send_and_wait(build_rate_command_gen9(key, 1, layers)):
+                result["applied"].append(label)
+            else:
+                result["rejected"].append(label)
+
+            time.sleep(0.05)
+
+    print(f"Protocols acknowledged: {result['applied']}")
+
+    if result["rejected"]:
+        print(f"Protocols rejected: {result['rejected']}")
+
+    return result
 
 
 def parse_message_rates(text: str) -> list:
