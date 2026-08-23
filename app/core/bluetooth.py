@@ -28,6 +28,10 @@ _thread: threading.Thread = None
 _stop_event: threading.Event = None
 _server = None
 
+# Held while a phone is being served, so a second one is turned away at once
+# instead of sitting in the backlog looking like a hung connection
+_busy = threading.Lock()
+
 _state = {
     "enabled": False,
     "listening": False,
@@ -39,6 +43,8 @@ _state = {
     "serial_profile": False,
     "channel": None,
     "peer": None,
+    "pairable": False,
+    "refused": 0,
     "requests": 0,
     "last_command": None,
     "last_error": None,
@@ -83,6 +89,7 @@ def read_adapter() -> dict:
         "name": None,
         "powered": False,
         "discoverable": False,
+        "pairable": False,
     }
 
     success, output = _bluetoothctl(["show"])
@@ -105,8 +112,42 @@ def read_adapter() -> dict:
             state["powered"] = line.partition(":")[2].strip() == "yes"
         elif line.startswith("Discoverable:"):
             state["discoverable"] = line.partition(":")[2].strip() == "yes"
+        elif line.startswith("Pairable:"):
+            state["pairable"] = line.partition(":")[2].strip() == "yes"
 
     return state
+
+
+def list_devices() -> dict:
+    """Which phones are paired, and which one is connected right now.
+
+    The RFCOMM peer only shows a phone that has opened the serial link. This
+    shows the Bluetooth level, which is what tells you whether pairing worked
+    at all.
+    """
+    result = {"paired": [], "connected": []}
+
+    for kind, argument in (("paired", "Paired"), ("connected", "Connected")):
+        success, output = _bluetoothctl([f"devices {argument}"])
+
+        if not success:
+            continue
+
+        for line in output.splitlines():
+            line = line.strip()
+
+            # Lines look like: Device AA:BB:CC:DD:EE:FF Pixel 7
+            if not line.startswith("Device "):
+                continue
+
+            parts = line.split(None, 2)
+            if len(parts) >= 2:
+                result[kind].append({
+                    "address": parts[1],
+                    "name": parts[2] if len(parts) > 2 else None,
+                })
+
+    return result
 
 
 def has_serial_profile() -> bool:
@@ -132,7 +173,14 @@ def prepare_adapter(name: str) -> dict:
     Discoverability normally expires after three minutes, which is no use to a
     unit sitting in a field, so the timeout is turned off.
     """
-    commands = ["power on", "pairable on", "discoverable-timeout 0", "discoverable on"]
+    pairable = "on" if config.BLUETOOTH_PAIRABLE else "off"
+
+    commands = [
+        "power on",
+        f"pairable {pairable}",
+        "discoverable-timeout 0",
+        f"discoverable {pairable}",
+    ]
 
     if name:
         commands.insert(1, f"system-alias {name}")
@@ -275,7 +323,7 @@ def start():
         _server = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
         _server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         _server.bind((socket.BDADDR_ANY, config.BLUETOOTH_CHANNEL))
-        _server.listen(1)
+        _server.listen(2)
         _server.settimeout(1.0)
     except Exception as e:
         _state["last_error"] = str(e)
@@ -340,21 +388,60 @@ def _accept_loop():
             return
 
         peer = address[0] if isinstance(address, tuple) else str(address)
-        _state["peer"] = peer
-        print(f"Bluetooth client connected: {peer}")
 
-        try:
-            _serve_client(connection)
-        except Exception as e:
-            _state["last_error"] = str(e)
-            print(f"Bluetooth connection failed: {e}")
-        finally:
+        # Connections are taken one at a time. A second phone is told so and
+        # dropped immediately, rather than waiting in the backlog while the
+        # first one is served, which on the phone looks like a dead link.
+        if not _busy.acquire(blocking=False):
+            _state["refused"] += 1
+            print(f"Bluetooth client refused, already serving {_state['peer']}: {peer}")
+
             try:
-                connection.close()
+                _send(connection, {"status": "error", "message": "another phone is connected"})
             except Exception:
                 pass
-            _state["peer"] = None
-            print(f"Bluetooth client disconnected: {peer}")
+            finally:
+                _close(connection)
+
+            continue
+
+        # Served on its own thread so the loop is free to refuse the next one
+        handler = threading.Thread(target=_handle_client, args=(connection, peer), daemon=True)
+        handler.start()
+
+
+def _handle_client(connection, peer: str):
+    """Serves one phone, then frees the slot for the next."""
+    _state["peer"] = peer
+    print(f"Bluetooth client connected: {peer}")
+
+    try:
+        _serve_client(connection)
+    except Exception as e:
+        _state["last_error"] = str(e)
+        print(f"Bluetooth connection failed: {e}")
+    finally:
+        _close(connection)
+        _state["peer"] = None
+        _busy.release()
+        print(f"Bluetooth client disconnected: {peer}")
+
+
+def _close(connection):
+    """Closes a connection without throwing away what was just written.
+
+    Closing outright can discard buffered bytes, so the refusal message would
+    never reach the phone that needs to read it.
+    """
+    try:
+        connection.shutdown(socket.SHUT_WR)
+    except Exception:
+        pass
+
+    try:
+        connection.close()
+    except Exception:
+        pass
 
 
 def _serve_client(connection):

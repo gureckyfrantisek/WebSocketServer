@@ -81,19 +81,34 @@ fi
 
 # --- Pairing agent -----------------------------------------------------------
 
-if [ -n "$PIN" ]; then
-    if ! command -v bt-agent >/dev/null; then
-        echo "Installing bluez-tools for the pairing agent"
-        apt-get install -y bluez-tools
-    fi
+# An agent has to be running for the whole time the Pi is up. Registering one
+# from a piped bluetoothctl session is no use, the agent disappears the moment
+# that session ends, and pairing then fails on the phone with nothing on this
+# side to answer it. So the agent gets its own service.
 
+if ! command -v bt-agent >/dev/null; then
+    echo "Installing bluez-tools for the pairing agent"
+    apt-get install -y bluez-tools
+fi
+
+if [ -n "$PIN" ]; then
     echo "Requiring pin $PIN when pairing"
 
     # One line per device, the star matches any of them
     echo "* $PIN" > /etc/bluetooth/pins
     chmod 600 /etc/bluetooth/pins
 
-    cat > /etc/systemd/system/bt-agent.service <<EOF
+    AGENT_ARGS="-c DisplayOnly -p /etc/bluetooth/pins"
+    AGENT_MODE="DisplayOnly"
+else
+    echo "Pairing without a pin, anyone in range can pair"
+
+    # Accepts the pairing itself, so a headless Pi needs nobody to confirm
+    AGENT_ARGS="-c NoInputNoOutput"
+    AGENT_MODE="NoInputNoOutput"
+fi
+
+cat > /etc/systemd/system/bt-agent.service <<EOF
 [Unit]
 Description=Bluetooth pairing agent for $NAME
 After=bluetooth.service
@@ -101,7 +116,7 @@ Requires=bluetooth.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/bt-agent -c DisplayOnly -p /etc/bluetooth/pins
+ExecStart=/usr/bin/bt-agent $AGENT_ARGS
 Restart=always
 RestartSec=5
 
@@ -109,15 +124,19 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
-    systemctl daemon-reload
-    systemctl enable --now bt-agent
-    AGENT_MODE="DisplayOnly"
-else
-    echo "Pairing without a pin, anyone in range can pair"
-    AGENT_MODE="NoInputNoOutput"
-fi
+systemctl daemon-reload
+systemctl enable --now bt-agent
+systemctl is-active --quiet bt-agent && echo "Pairing agent running ($AGENT_MODE)"     || echo "Pairing agent failed to start, pairing will not work"
 
 # --- Adapter -----------------------------------------------------------------
+
+# A soft block leaves the adapter looking configured but powered down, and
+# every command below would quietly fail to take effect
+if rfkill list bluetooth 2>/dev/null | grep -q "Soft blocked: yes"; then
+    echo "Bluetooth is soft blocked, unblocking"
+    rfkill unblock bluetooth
+    sleep 1
+fi
 
 echo "Naming the adapter and making it discoverable"
 
@@ -133,7 +152,8 @@ default-agent
 EOF
 
 echo "Adapter state:"
-bluetoothctl show | grep -E "Alias|Powered|Discoverable:"
+bluetoothctl show | grep -E "Alias|Powered|Discoverable:|Pairable:"
+
 
 # Discoverability normally times out after three minutes. A field unit has
 # nobody around to press a button, so it stays discoverable.
