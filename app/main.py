@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.core import config, discovery, serial_link, static_session, ublox, wifi, ws_bridge
-from app.routers import common, discovery as discovery_router, gnss, points, static, wifi as wifi_router, ws
+from app.routers import common, discovery as discovery_router, gnss, points, static, storage as storage_router, wifi as wifi_router, ws
 
 
 @asynccontextmanager
@@ -42,5 +42,6 @@ app.include_router(wifi_router.router, prefix="/wifi", tags=["WiFi"])
 app.include_router(discovery_router.router, prefix="/discovery", tags=["Discovery"])
 app.include_router(static.router, prefix="/static", tags=["Static measurement"])
 app.include_router(points.router, prefix="/points", tags=["Points"])
+app.include_router(storage_router.router, prefix="/storage", tags=["Storage"])
 app.include_router(ws.router, tags=["WebSocket"])
 app.include_router(common.router, tags=["Common"])

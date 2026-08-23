@@ -192,10 +192,27 @@ POST   /points/{bod}/download            kopie na flash disk
 POST   /points/{bod}/download?cleanup=true   kopie a smazání lokální kopie
 ```
 
-Zapisuje se nejdřív na lokální disk, na flash disk se kopíruje až na vyžádání.
-Odpojený nebo chybějící flash disk tak nemůže rozbít probíhající měření.
-Flash disk se hledá v `BASE_USB_PATH`, použije se první připojené zařízení,
-na Raspberry Pi to bývá `/media/pi`.
+Když je zapojený flash disk, zapisuje se rovnou na něj, do podsložky `gnss`.
+Data pak odejdou i s diskem a nic se nemusí přesouvat. Bez disku se měření
+uloží do `LOCAL_DATA_PATH` a dá se na disk zkopírovat později.
+
+Kde měření skončí, říká `GET /storage/status`, položka `writing_to`. Ta samá
+odpověď obsahuje i volné místo na obou úložištích.
+
+```
+GET  /storage/status                 kam se zapisuje a kolik zbývá místa
+POST /storage/download-all           přesun všech lokálních měření na disk
+POST /storage/download-all?cleanup=true
+```
+
+Flash disk se hledá v `BASE_USB_PATH`, na Raspberry Pi to bývá `/media/pi`.
+Bere se jen skutečně připojené zařízení. Prázdná složka, která po disku někdy
+zůstane, se přeskočí, aby se místo na disk nezapisovalo na SD kartu.
+
+`LOCAL_DATA_PATH` záměrně není v `/tmp`, systemd tuto složku maže. Výchozí
+hodnota `data` je relativní ke složce aplikace.
+
+Chování jde otočit přes `PREFER_USB=0`, pak se zapisuje vždy lokálně.
 
 Soubor se průběžně ukládá jednou za pět sekund, výpadek napájení tedy může
 přijít nanejvýš o posledních pět sekund záznamu.

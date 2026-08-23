@@ -31,6 +31,7 @@ def get_state() -> dict:
     return {
         "recording": True,
         "point_id": session["point_id"],
+        "location": session["location"],
         "start_ns": session["start_ns"],
         "bytes_written": session["bytes_written"],
         "raw_file": session["raw_name"],
@@ -62,10 +63,11 @@ def start(point_id: str):
         if not serial_link.verify_connection():
             return 2
 
-        folder = storage.get_data_path()
+        # A flash drive wins when one is plugged in, so the data leaves with it
+        folder, location = storage.get_write_path()
 
         # Measuring the same point again keeps both recordings
-        file_name = storage.unique_name(safe_point)
+        file_name = storage.unique_name(safe_point, folder)
         raw_path = os.path.join(folder, file_name + storage.RAW_SUFFIX)
         meta_path = os.path.join(folder, file_name + storage.META_SUFFIX)
 
@@ -78,6 +80,8 @@ def start(point_id: str):
         _session = {
             "point_id": point_id,
             "file_name": file_name,
+            "location": location,
+            "folder": folder,
             "raw_path": raw_path,
             "raw_name": file_name + storage.RAW_SUFFIX,
             "meta_path": meta_path,
@@ -91,7 +95,7 @@ def start(point_id: str):
     _write_metadata(_session, finished=False)
     serial_link.subscribe(_on_serial_data)
 
-    print(f"Static measurement started: {_session['raw_name']}")
+    print(f"Static measurement started: {_session['raw_name']} on {location} storage")
     return True
 
 
@@ -128,6 +132,7 @@ def stop():
     return {
         "point_id": session["point_id"],
         "file_name": session["file_name"],
+        "location": session["location"],
         "start_ns": session["start_ns"],
         "end_ns": session["end_ns"],
         "duration_s": (session["end_ns"] - session["start_ns"]) / 1e9,
@@ -167,6 +172,7 @@ def _write_metadata(session, finished: bool):
     metadata = {
         "point_id": session["point_id"],
         "file_name": session["file_name"],
+        "location": session["location"],
         "start_ns": session["start_ns"],
         "end_ns": session.get("end_ns"),
         "finished": finished,

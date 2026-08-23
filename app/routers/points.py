@@ -8,17 +8,9 @@ router = APIRouter()
 
 @router.get("")
 def get_points_route():
-    points = storage.get_points()
-
-    if points is False:
-        return responses.JSONResponse(
-            status_code=500,
-            content={"status": "local storage unreadable"},
-        )
-
     return responses.JSONResponse(
         status_code=200,
-        content={"points": points},
+        content={"points": storage.get_points()},
     )
 
 
@@ -34,7 +26,7 @@ def get_point_files_route(point_name: str):
 
     return responses.JSONResponse(
         status_code=200,
-        content={"point_files": response},
+        content=response,
     )
 
 
@@ -64,7 +56,7 @@ def delete_point_route(point_name: str):
 
 @router.post("/{point_name}/download")
 def download_point_route(point_name: str, cleanup: bool = False):
-    """Copies the recording onto the USB flash drive."""
+    """Moves a locally stored recording onto the flash drive."""
     response = storage.download_point(point_name, cleanup)
 
     match response:
@@ -77,7 +69,7 @@ def download_point_route(point_name: str, cleanup: bool = False):
         case 2:
             return responses.JSONResponse(
                 status_code=404,
-                content={"status": "invalid point or USB unavailable"},
+                content={"status": "invalid point"},
             )
 
         case 3:
@@ -90,4 +82,16 @@ def download_point_route(point_name: str, cleanup: bool = False):
             return responses.JSONResponse(
                 status_code=500,
                 content={"status": "cleanup failed"},
+            )
+
+        case 5:
+            return responses.JSONResponse(
+                status_code=200,
+                content={"status": "already on the flash drive"},
+            )
+
+        case 6:
+            return responses.JSONResponse(
+                status_code=503,
+                content={"status": "no flash drive mounted"},
             )

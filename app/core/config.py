@@ -75,6 +75,14 @@ DISCOVERY_PORT = _env_int("DISCOVERY_PORT", 41234)
 DISCOVERY_INTERVAL_S = _env_float("DISCOVERY_INTERVAL_S", 1.0)
 WIFI_INTERFACE = _env_str("WIFI_INTERFACE", "wlan0")
 
-# Storage
-LOCAL_DATA_PATH = _env_str("LOCAL_DATA_PATH", "/tmp/projects")
+# Storage.
+# Recordings go onto a flash drive when one is plugged in, otherwise into
+# LOCAL_DATA_PATH. That folder is relative to where the server was started,
+# which the service file pins to the application directory. It deliberately
+# avoids /tmp, which systemd empties.
+PREFER_USB = _env_bool("PREFER_USB", True)
+LOCAL_DATA_PATH = _env_str("LOCAL_DATA_PATH", "data")
 BASE_USB_PATH = _env_str("BASE_USB_PATH", f"/media/{getuser()}")
+
+# Subfolder made on the flash drive, empty writes into the root of the drive
+USB_SUBDIR = _env_str("USB_SUBDIR", "gnss")
