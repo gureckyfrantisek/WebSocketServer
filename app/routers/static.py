@@ -19,36 +19,34 @@ def start_static_route(point_id: str):
     """Records one surveyed point, the point id names the files."""
     response = static_session.start(point_id)
 
-    match response:
-        case True:
-            return responses.JSONResponse(
-                status_code=200,
-                content={"status": "recording", **static_session.get_state()},
-            )
+    if response is True:
+        return responses.JSONResponse(
+            status_code=200,
+            content={"status": "recording", **static_session.get_state()},
+        )
 
-        case 1:
-            return responses.JSONResponse(
-                status_code=409,
-                content={"status": "already recording"},
-            )
+    if response == 1:
+        return responses.JSONResponse(
+            status_code=409,
+            content={"status": "already recording"},
+        )
 
-        case 2:
-            return responses.JSONResponse(
-                status_code=503,
-                content={"status": "receiver not connected"},
-            )
+    if response == 2:
+        return responses.JSONResponse(
+            status_code=503,
+            content={"status": "receiver not connected"},
+        )
 
-        case 3:
-            return responses.JSONResponse(
-                status_code=500,
-                content={"status": "could not open the measurement file"},
-            )
+    if response == 4:
+        return responses.JSONResponse(
+            status_code=400,
+            content={"status": "unusable point id"},
+        )
 
-        case 4:
-            return responses.JSONResponse(
-                status_code=400,
-                content={"status": "unusable point id"},
-            )
+    return responses.JSONResponse(
+        status_code=500,
+        content={"status": "could not open the measurement file"},
+    )
 
 
 @router.post("/stop")
