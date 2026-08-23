@@ -74,6 +74,17 @@ WIFI_FALLBACK_PRIORITY = _env_int("WIFI_FALLBACK_PRIORITY", 10)
 
 WIFI_WATCHDOG_S = _env_float("WIFI_WATCHDOG_S", 15.0)
 
+# Bluetooth handshake. The phone is paired once through Android settings, then
+# hands over the hotspot credentials and receives the address to connect to.
+BLUETOOTH_ENABLED = _env_bool("BLUETOOTH_ENABLED", False)
+BLUETOOTH_NAME = _env_str("BLUETOOTH_NAME", "K155GNSS")
+BLUETOOTH_CHANNEL = _env_int("BLUETOOTH_CHANNEL", 1)
+
+# Shared secret the phone must send with anything that changes the Pi.
+# Pairing alone only proves a phone was once paired, it does not stop a paired
+# device from redirecting the Pi onto another network. Empty disables the check.
+BLUETOOTH_TOKEN = _env_str("BLUETOOTH_TOKEN", "")
+
 # UDP discovery beacon
 DISCOVERY_ENABLED = _env_bool("DISCOVERY_ENABLED", True)
 DISCOVERY_PORT = _env_int("DISCOVERY_PORT", 41234)

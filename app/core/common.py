@@ -1,7 +1,7 @@
 # Shared state and status reporting across the modules
 import time
 
-from app.core import config, discovery, serial_link, static_session, storage, wifi, ws_bridge
+from app.core import bluetooth, config, discovery, serial_link, static_session, storage, wifi, ws_bridge
 
 
 def now_ns() -> int:
@@ -23,6 +23,7 @@ def get_status() -> dict:
         "static": static_session.get_state(),
         "storage": storage.get_state(),
         "wifi": wifi.get_state(),
+        "bluetooth": bluetooth.get_state(),
     }
 
     ready = gnss["connected"]

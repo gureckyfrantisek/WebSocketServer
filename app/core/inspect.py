@@ -61,15 +61,30 @@ def sample(seconds: float = 2.0) -> dict:
 
 
 def count_nmea(data: bytes) -> dict:
-    """How many of each NMEA sentence type appeared."""
-    counts = {}
+    """How many of each NMEA sentence type appeared.
 
-    for line in data.split(b"\r\n"):
-        if not line.startswith(b"$") or len(line) < 6:
+    Sentences are found by their start marker rather than by splitting on line
+    endings, because a sentence following a binary UBX frame shares a segment
+    with the tail of that frame and would otherwise be missed.
+    """
+    counts = {}
+    index = 0
+
+    while True:
+        start = data.find(b"$", index)
+
+        if start < 0 or start + 6 > len(data):
+            break
+
+        index = start + 1
+        talker = data[start + 1:start + 6]
+
+        # Real talkers are letters and digits, binary noise is not
+        if not talker.isalnum():
             continue
 
-        talker = line[1:6].decode("ascii", errors="replace")
-        counts[talker] = counts.get(talker, 0) + 1
+        name = talker.decode("ascii", errors="replace")
+        counts[name] = counts.get(name, 0) + 1
 
     return dict(sorted(counts.items(), key=lambda item: -item[1]))
 

@@ -3,9 +3,9 @@
 # NetworkManager does the actual work. The server only makes sure a connection
 # profile exists and nudges it when the link drops, so the Pi still reconnects
 # on its own even while this server is not running.
-import shlex
 import subprocess
 import threading
+import time
 
 from app.core import config
 
@@ -191,6 +191,47 @@ def apply_profiles() -> dict:
             result["failed"].append(ssid)
 
     return result
+
+
+def join(ssid: str, password: str, priority=None, timeout_s=30.0) -> dict:
+    """Joins a network given fresh credentials and waits for an address.
+
+    Used by the Bluetooth handshake, where the phone hands over its hotspot
+    details and expects the address to connect back to.
+
+    Parameters:
+        ssid (string): Network name
+        password (string): Network password, empty keeps a stored one
+        priority (int): Autoconnect priority, defaults to the hotspot priority
+        timeout_s (float): How long to wait for an address
+
+    Returns:
+        dict: State with an "ip" once the link is up, plus "error" on failure
+    """
+    if priority is None:
+        priority = config.WIFI_PRIORITY
+
+    if not is_available():
+        return {"error": "nmcli is not installed"}
+
+    if not ensure_profile(ssid, password, priority):
+        return {"error": _state["last_error"] or "could not write the profile"}
+
+    if not connect(ssid):
+        return {"error": _state["last_error"] or "could not connect"}
+
+    # An address does not appear the instant the link comes up
+    deadline = time.time() + timeout_s
+
+    while time.time() < deadline:
+        state = refresh_state()
+
+        if state["connected"] and state["ip"]:
+            return dict(state)
+
+        time.sleep(1.0)
+
+    return {"error": "connected but no address was assigned", **dict(_state)}
 
 
 # --- Watchdog ----------------------------------------------------------------

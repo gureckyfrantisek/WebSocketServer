@@ -2,8 +2,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.core import config, discovery, serial_link, static_session, ublox, wifi, ws_bridge
-from app.routers import common, discovery as discovery_router, gnss, points, static, storage as storage_router, wifi as wifi_router, ws
+from app.core import bluetooth, config, discovery, serial_link, static_session, ublox, wifi, ws_bridge
+from app.routers import bluetooth as bluetooth_router, common, discovery as discovery_router, gnss, points, static, storage as storage_router, wifi as wifi_router, ws
 
 
 @asynccontextmanager
@@ -19,6 +19,10 @@ async def lifespan(app: FastAPI):
     # The supervisor opens the receiver port and reopens it after an unplug
     serial_link.start_supervisor()
 
+    if config.BLUETOOTH_ENABLED:
+        # Runs alongside the beacon, the phone may use either way in
+        bluetooth.start()
+
     if config.DISCOVERY_ENABLED:
         # The beacon runs only while nobody is connected, keeping the link 1:1
         ws_bridge.on_connected.append(discovery.stop)
@@ -29,6 +33,7 @@ async def lifespan(app: FastAPI):
 
     # A measurement left running must still end up with a closed file
     static_session.stop()
+    bluetooth.stop()
     discovery.stop()
     wifi.stop_watchdog()
     serial_link.stop_supervisor()
@@ -39,6 +44,7 @@ app = FastAPI(title="K155 GNSS Server", lifespan=lifespan)
 
 app.include_router(gnss.router, prefix="/gnss", tags=["GNSS"])
 app.include_router(wifi_router.router, prefix="/wifi", tags=["WiFi"])
+app.include_router(bluetooth_router.router, prefix="/bluetooth", tags=["Bluetooth"])
 app.include_router(discovery_router.router, prefix="/discovery", tags=["Discovery"])
 app.include_router(static.router, prefix="/static", tags=["Static measurement"])
 app.include_router(points.router, prefix="/points", tags=["Points"])

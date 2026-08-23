@@ -100,6 +100,65 @@ python tools/ws_client.py 192.168.1.42     # server na Raspberry Pi
 - Uvicorn sám posílá ping rámce, takže tiše odpojený klient uvolní slot
   i bez korektního zavření spojení.
 
+### Discovery přes Bluetooth
+
+UDP beacon má zásadní slabinu: aby Pi mohlo vysílat svoji adresu, musí už být
+na stejné síti jako telefon, jenže na hotspot se bez přihlašovacích údajů
+nepřipojí. Bluetooth tuhle smyčku rozetne, protože údaje přenese mimo síť.
+
+Průběh:
+
+1. Telefon se jednou spáruje s Pi přes systémové nastavení Bluetooth.
+2. Aplikace po spuštění otevře sériové spojení (Serial Port Profile).
+3. Pošle jméno a heslo hotspotu.
+4. Pi se na hotspot připojí a odpoví svojí adresou.
+5. Aplikace se na tu adresu připojí WebSocketem, dál už je vše stejné.
+
+Zprávy jsou jednořádkový JSON, jeden dotaz a jedna odpověď na řádek:
+
+```json
+{"command":"hello"}
+{"command":"status"}
+{"command":"connect_wifi","ssid":"hotspot","password":"heslo"}
+```
+
+Odpověď při úspěchu:
+
+```json
+{"status":"ok","ip":"192.168.43.42","ssid":"hotspot","server_port":8080,
+ "ws_url":"ws://192.168.43.42:8080/","api_url":"http://192.168.43.42:8080"}
+```
+
+Nastavení na Raspberry Pi, stačí jednou:
+
+```bash
+sudo bash deploy/bluetooth_setup.sh K155GNSS
+```
+
+Skript pojmenuje adaptér, zapne párování bez PINu, a hlavně zveřejní záznam
+Serial Port Profile. Bez něj telefon nemá jak zjistit, na který kanál se
+připojit. To vyžaduje `bluetoothd` v režimu kompatibility, což skript zařídí
+přes override systemd jednotky.
+
+Pak v `.env`:
+
+```
+BLUETOOTH_ENABLED=1
+BLUETOOTH_NAME=K155GNSS
+BLUETOOTH_CHANNEL=1
+```
+
+Stav je na `GET /bluetooth/status`, ručně se dá spustit a zastavit přes
+`POST /bluetooth/start` a `/bluetooth/stop`.
+
+Obojí může běžet vedle sebe. Dokud aplikace neumí Bluetooth, `DISCOVERY_ENABLED=1`
+nechává UDP beacon funkční. Až Bluetooth zafunguje, dává smysl beacon vypnout.
+
+Heslo k hotspotu jde po spárovaném spoji, který je šifrovaný. Znamená to ale
+také, že jakékoliv spárované zařízení může Pi přikázat, aby se připojilo jinam.
+Pro terénní jednotku je to přijatelné, u citlivějšího nasazení by chtělo přidat
+sdílený token.
+
 ### Discovery přes UDP
 
 Raspberry Pi se připojuje k hotspotu telefonu jako klient, takže aplikace
