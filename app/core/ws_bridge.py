@@ -4,7 +4,7 @@
 # receiver. Only one client at a time, the same as the original Node server.
 import threading
 
-from app.core import nmea, serial_link
+from app.core import config, nmea, serial_link
 
 # Sentences buffered for the client before the oldest ones get dropped
 QUEUE_LIMIT = 1000
@@ -31,6 +31,7 @@ def get_state() -> dict:
 
     return {
         "connected": True,
+        "framing": config.WS_FRAMING,
         "peer": session["peer"],
         "connected_since_ns": session["connected_ns"],
         "sentences_sent": session["sentences_sent"],
@@ -60,7 +61,7 @@ def acquire(peer: str, loop, queue) -> bool:
             "peer": peer,
             "loop": loop,
             "queue": queue,
-            "extractor": nmea.Extractor(),
+            "extractor": nmea.Extractor() if config.WS_FRAMING == "lines" else None,
             "connected_ns": serial_link.now_ns(),
             "sentences_sent": 0,
             "sentences_dropped": 0,
@@ -100,7 +101,16 @@ def _on_serial_data(chunk: bytes):
     if not session:
         return
 
-    sentences = session["extractor"].feed(chunk)
+    extractor = session["extractor"]
+
+    if extractor is None:
+        # Pass the chunk straight through, the way the Node server did.
+        # Undecodable bytes become the replacement character rather than
+        # dropping the whole chunk, so binary UBX cannot break the stream.
+        sentences = [chunk.decode("utf-8", errors="replace")]
+    else:
+        sentences = extractor.feed(chunk)
+
     if not sentences:
         return
 

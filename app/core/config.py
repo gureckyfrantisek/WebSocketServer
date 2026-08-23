@@ -54,6 +54,11 @@ UBX_SAVE_TO_FLASH = _env_bool("UBX_SAVE_TO_FLASH", False)
 # Server
 SERVER_PORT = _env_int("SERVER_PORT", 8080)
 
+# What the WebSocket carries.
+#   raw    every chunk exactly as it came off the port, like the Node server
+#   lines  only complete NMEA sentences, binary UBX filtered out
+WS_FRAMING = _env_str("WS_FRAMING", "raw")
+
 # WiFi, managed through NetworkManager on the Raspberry Pi.
 # Credentials belong in .env, never in the code or in git.
 WIFI_MANAGED = _env_bool("WIFI_MANAGED", False)
