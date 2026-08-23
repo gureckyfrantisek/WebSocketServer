@@ -66,6 +66,10 @@ BLUETOOTH_ENABLED = _env_bool("BLUETOOTH_ENABLED", True)
 BLUETOOTH_NAME = _env_str("BLUETOOTH_NAME", "K155GNSS")
 BLUETOOTH_CHANNEL = _env_int("BLUETOOTH_CHANNEL", 1)
 
+# 1 = any phone in range can pair. Turn it off once the phone is paired, a
+# device that already bonded still connects, new ones cannot.
+BLUETOOTH_PAIRABLE = _env_bool("BLUETOOTH_PAIRABLE", True)
+
 # Shared secret the phone must send with anything that changes the Pi.
 # Pairing alone only proves a phone was once paired, it does not stop a paired
 # device from redirecting the Pi onto another network. Empty disables the check.
