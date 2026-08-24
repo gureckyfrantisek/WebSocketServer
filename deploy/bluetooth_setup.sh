@@ -61,6 +61,10 @@ MAIN_CONF="/etc/bluetooth/main.conf"
 if [ -f "$MAIN_CONF" ]; then
     echo "Making the adapter power up at boot"
 
+    # Restarting Bluetooth takes the controller away for a few seconds, so it
+    # only happens when the file really changed rather than on every run
+    CONF_BEFORE=$(md5sum "$MAIN_CONF" | cut -d' ' -f1)
+
     if grep -q '^\s*#\?\s*AutoEnable' "$MAIN_CONF"; then
         sed -i 's/^\s*#\?\s*AutoEnable.*/AutoEnable=true/' "$MAIN_CONF"
     elif grep -q '^\[Policy\]' "$MAIN_CONF"; then
@@ -84,8 +88,14 @@ if [ -f "$MAIN_CONF" ]; then
         sed -i '/^\[General\]/a Class = 0x1F00' "$MAIN_CONF"
     fi
 
-    systemctl restart bluetooth
-    sleep 2
+    CONF_AFTER=$(md5sum "$MAIN_CONF" | cut -d' ' -f1)
+
+    if [ "$CONF_BEFORE" != "$CONF_AFTER" ]; then
+        systemctl restart bluetooth
+        sleep 2
+    else
+        echo "$MAIN_CONF was already right, leaving Bluetooth running"
+    fi
 fi
 
 # --- Pairing agent -----------------------------------------------------------
@@ -151,6 +161,41 @@ if rfkill list bluetooth 2>/dev/null | grep -q "Soft blocked: yes"; then
     sleep 1
 fi
 
+# bluetoothd accepts connections before the controller is registered with it,
+# and until it is, every command answers "No default controller available".
+# A restart of the Bluetooth service is enough to open that window.
+echo "Waiting for the controller"
+
+CONTROLLER=""
+
+for _ in $(seq 1 30); do
+    if bluetoothctl list 2>/dev/null | grep -q "^Controller "; then
+        CONTROLLER="yes"
+        break
+    fi
+    sleep 1
+done
+
+if [ -z "$CONTROLLER" ]; then
+    echo "No Bluetooth controller appeared within 30s."
+    echo "Check that the radio is there and not blocked:"
+    echo "  rfkill list bluetooth"
+    echo "  dmesg | grep -i -E 'bluetooth|hci'"
+    echo "  systemctl status hciuart"
+    echo "  systemctl status bluetooth"
+    echo
+    # The receiver needs the good UART, so Bluetooth is pushed onto the mini
+    # UART by the miniuart-bt overlay. The mini UART takes its baud rate from
+    # the VPU core clock, and when that clock scales the radio cannot be
+    # talked to, which btuart reports as a timed out initialisation. Pinning
+    # the minimum core clock is what keeps it reachable.
+    echo "On a Raspberry Pi, \"btuart: Initialization timed out\" with"
+    echo "dtoverlay=miniuart-bt in config.txt means the mini UART baud rate is"
+    echo "drifting. Add core_freq_min=500 (Pi 4 and CM4) or core_freq=250"
+    echo "(Pi 3) to config.txt and reboot."
+    exit 1
+fi
+
 echo "Naming the adapter and making it discoverable"
 
 # One command per bluetoothctl run, never piped into one session. A piped
@@ -160,11 +205,27 @@ echo "Naming the adapter and making it discoverable"
 #
 # The alias is what the phone shows in its list of devices. No agent commands
 # here, bt-agent above owns the agent for as long as the Pi is up.
-bluetoothctl power on
-bluetoothctl system-alias "$NAME"
-bluetoothctl pairable on
-bluetoothctl discoverable-timeout 0
-bluetoothctl discoverable on
+#
+# Each one is retried, since the controller can be registered and still refuse
+# the first command or two, and none of them is allowed to end the script: a
+# rejected setting must not stop the rest being applied.
+adapter_command() {
+    for _ in 1 2 3; do
+        if bluetoothctl "$@"; then
+            return 0
+        fi
+        sleep 2
+    done
+
+    echo "  giving up on: bluetoothctl $*"
+    return 0
+}
+
+adapter_command power on
+adapter_command system-alias "$NAME"
+adapter_command pairable on
+adapter_command discoverable-timeout 0
+adapter_command discoverable on
 
 echo "Adapter state:"
 bluetoothctl show | grep -E "Alias|Powered|Discoverable|Pairable"

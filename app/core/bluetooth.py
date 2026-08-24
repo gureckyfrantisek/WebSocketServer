@@ -279,7 +279,7 @@ def unblock_adapter() -> bool:
     return True
 
 
-def wait_for_adapter(timeout: float = 20.0) -> dict:
+def wait_for_adapter(timeout: float = 60.0) -> dict:
     """Waits for the controller to be enumerated before anything is set on it.
 
     bluetooth.service counts as started before the controller is up, and at
