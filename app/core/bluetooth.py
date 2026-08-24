@@ -12,6 +12,7 @@
 # line.
 import hmac
 import json
+import os
 import socket
 import subprocess
 import threading
@@ -26,6 +27,7 @@ SPP_UUID = "00001101-0000-1000-8000-00805F9B34FB"
 MAX_LINE_BYTES = 4096
 
 _thread: threading.Thread = None
+_start_thread: threading.Thread = None
 _stop_event: threading.Event = None
 _server = None
 
@@ -68,6 +70,12 @@ def _bluetoothctl(commands: list):
     Returns:
         tuple: (success, output)
     """
+    # Without a controller bluetoothd is not running, and bluetoothctl then
+    # waits for it forever rather than failing. Nothing below may be reached
+    # in that state.
+    if not has_controller():
+        return False, "no Bluetooth controller"
+
     collected = []
     failed = []
 
@@ -279,6 +287,22 @@ def unblock_adapter() -> bool:
     return True
 
 
+def has_controller() -> bool:
+    """Whether the kernel has a Bluetooth controller at all.
+
+    Read straight from sysfs rather than by asking bluetoothctl, because when
+    there is no controller bluetoothd does not run either: its unit carries
+    ConditionPathIsDirectory=/sys/class/bluetooth and is skipped. bluetoothctl
+    against a bluetoothd that is not there blocks forever instead of failing,
+    which is the difference between a server that reports no Bluetooth and a
+    server that never finishes starting.
+    """
+    try:
+        return bool(os.listdir("/sys/class/bluetooth"))
+    except OSError:
+        return False
+
+
 def wait_for_adapter(timeout: float = 60.0) -> dict:
     """Waits for the controller to be enumerated before anything is set on it.
 
@@ -286,18 +310,29 @@ def wait_for_adapter(timeout: float = 60.0) -> dict:
     boot the server follows it immediately. Commands sent in that gap are
     accepted and lost, which leaves the Pi listening but invisible until
     somebody restarts the service by hand.
+
+    On a Raspberry Pi the radio is attached over a UART by hciuart, which can
+    take ten seconds and can fail outright, so the wait is on sysfs and costs
+    nothing while there is nothing to talk to.
     """
     deadline = time.monotonic() + timeout
-    state = read_adapter()
 
-    while not state["address"] and time.monotonic() < deadline:
+    while not has_controller() and time.monotonic() < deadline:
         time.sleep(1.0)
-        state = read_adapter()
 
-    if not state["address"]:
-        print(f"No Bluetooth adapter appeared within {timeout:.0f}s")
+    if not has_controller():
+        print(f"No Bluetooth controller appeared within {timeout:.0f}s. "
+              f"On a Raspberry Pi check: systemctl status hciuart")
+        return {
+            "address": None,
+            "name": None,
+            "powered": False,
+            "discoverable": False,
+            "pairable": False,
+            "discoverable_timeout": None,
+        }
 
-    return state
+    return read_adapter()
 
 
 def prepare_adapter(name: str, attempts: int = 3) -> dict:
@@ -325,6 +360,11 @@ def prepare_adapter(name: str, attempts: int = 3) -> dict:
         time.sleep(1.0)
 
     state = wait_for_adapter()
+
+    # Nothing to configure and nothing that would answer, so the retries would
+    # only be a slow way of reaching the same conclusion
+    if not has_controller():
+        return state
 
     for attempt in range(1, attempts + 1):
         success, output = _bluetoothctl(commands)
@@ -468,6 +508,21 @@ def _address_response(state: dict) -> dict:
 
 # --- Server ------------------------------------------------------------------
 
+def start_background():
+    """Starts without holding up the rest of the server.
+
+    Bringing the adapter up waits on hardware: on a Raspberry Pi the radio is
+    attached over a UART at boot and that can take ten seconds, or never
+    finish. Run inline this would hold the whole application in startup, so a
+    receiver that works and a WebSocket that works would both be unreachable
+    because of a radio that does not.
+    """
+    global _start_thread
+
+    _start_thread = threading.Thread(target=start, daemon=True)
+    _start_thread.start()
+
+
 def start():
     """Starts listening for the phone on the RFCOMM channel."""
     global _thread, _stop_event, _server
@@ -522,7 +577,13 @@ def start():
 
 def stop():
     """Stops listening."""
-    global _thread, _stop_event, _server
+    global _thread, _start_thread, _stop_event, _server
+
+    # A start that is still waiting on the adapter is given a moment to finish,
+    # so it cannot open a socket after everything else has been closed
+    if _start_thread:
+        _start_thread.join(timeout=3.0)
+        _start_thread = None
 
     if _stop_event:
         _stop_event.set()

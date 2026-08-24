@@ -17,8 +17,9 @@ async def lifespan(app: FastAPI):
 
     # The only way the phone finds the Pi: it hands over the hotspot
     # credentials and gets the address back. Always on, there is no other
-    # way in.
-    bluetooth.start()
+    # way in, but off the startup path: waiting for a radio that may never
+    # attach must not keep the receiver and the WebSocket from coming up.
+    bluetooth.start_background()
 
     yield   # The server runs in here
 

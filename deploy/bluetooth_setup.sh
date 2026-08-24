@@ -161,6 +161,44 @@ if rfkill list bluetooth 2>/dev/null | grep -q "Soft blocked: yes"; then
     sleep 1
 fi
 
+# --- Attaching the radio -----------------------------------------------------
+
+# On a Raspberry Pi the built in radio hangs off a UART and hciuart flashes its
+# firmware at boot. With the receiver on the good PL011 the radio is left on the
+# mini UART, whose baud rate follows the VPU core clock, so the handshake can
+# time out for no reason anybody can see: "btuart: Initialization timed out".
+# It then never runs again, /sys/class/bluetooth stays empty, bluetooth.service
+# is skipped for a failed ConditionPathIsDirectory, and there is no Bluetooth
+# at all until somebody logs in. Retrying turns a lost race into a slow start.
+if [ -f /lib/systemd/system/hciuart.service ]; then
+    echo "Making hciuart retry a failed attach"
+
+    mkdir -p /etc/systemd/system/hciuart.service.d
+    cat > /etc/systemd/system/hciuart.service.d/retry.conf <<'EOF'
+[Unit]
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Restart=on-failure
+RestartSec=5
+
+# bluetooth.service is skipped at boot when /sys/class/bluetooth does not exist
+# yet, and systemd never revisits a skipped condition, so a late attach would
+# leave the controller there with no bluetoothd to drive it. Starting it from
+# here is what closes that gap. --no-block because a unit may not wait on
+# another unit from inside its own start.
+ExecStartPost=-/bin/systemctl --no-block start bluetooth
+EOF
+
+    systemctl daemon-reload
+
+    if ! systemctl is-active --quiet hciuart; then
+        echo "hciuart is not running, starting it"
+        systemctl restart hciuart || true
+    fi
+fi
+
 # bluetoothd accepts connections before the controller is registered with it,
 # and until it is, every command answers "No default controller available".
 # A restart of the Bluetooth service is enough to open that window.
