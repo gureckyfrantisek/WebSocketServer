@@ -355,31 +355,49 @@ sudo raspi-config
 Interface Options → Serial Port → přihlašovací shell **ne** → hardware serial
 **ano**, pak restart. Potom `/dev/serial0` patří přijímači.
 
-Raspberry Pi má dva UARTy a Bluetooth jeden z nich potřebuje. Kvalitní PL011
-(`ttyAMA0`) má dostat přijímač, takže Bluetooth se přesouvá na mini UART:
+#### Který UART komu
+
+Raspberry Pi 4 má dva použitelné UARTy a Bluetooth jeden z nich potřebuje —
+rádio BCM4345C0 je k UARTu připojené natvrdo, HCI nejde po USB. Kvalitní PL011
+(`ttyAMA0`) má vlastní hodiny a drží libovolnou rychlost. Mini UART (`ttyS0`)
+odvozuje přenosovou rychlost od frekvence jádra GPU, takže když ta škáluje,
+rychlost ujede a bajty se rozsypou.
+
+Ve výchozím stavu, **bez jakéhokoliv overlaye**, dostane PL011 Bluetooth a
+GPIO piny 14/15 dostanou mini UART. Tak to nechte:
 
 ```
 enable_uart=1
-dtoverlay=miniuart-bt
-core_freq_min=500
+core_freq=500
 ```
 
-`core_freq_min` tam musí být. Mini UART odvozuje přenosovou rychlost od
-frekvence jádra GPU, a když ta začne škálovat, `hciuart` se s rádiem nedomluví
-a spadne na `btuart: Initialization timed out`. Bluetooth pak vůbec není
-(`bluetoothctl list` nic nevypíše) a telefon nemá jak Pi najít. Na Pi 3 se
-místo toho použije `core_freq=250`.
+`dtoverlay=miniuart-bt` (ani starší název `pi3-miniuart-bt`) sem **nepatří**.
+Ten overlay UARTy prohodí a přijímač dostane PL011 na úkor Bluetooth. Zní to
+lákavě, ale rádio mini UART nesnese: `hciuart` buď spadne na
+`btuart: Initialization timed out`, nebo se připojí a pak selže inicializace
+řadiče na `hci0: command 0x1003 tx timeout` a adaptér zůstane `DOWN`.
+`bluetoothctl list` nevypíše nic a telefon nemá jak Pi najít. Přijímač mini
+UART naopak snese bez problémů.
+
+`core_freq=500` tam být musí a fixuje frekvenci jádra shora i zdola —
+`core_freq_min` drží jen spodní hranici, a s `arm_boost=1` se strop stejně
+hýbe. Na Pi 3 se použije `core_freq=250`.
 
 Kontrola po restartu:
 
 ```bash
-systemctl status hciuart
+hciconfig -a | head -4
 bluetoothctl list
 ls -l /dev/serial0
+curl -s localhost:8080/gnss/status
 ```
 
-`/dev/serial0` musí ukazovat na `ttyAMA0` a `bluetoothctl list` musí vypsat
-jeden Controller.
+`hci0` musí být `UP RUNNING`, `bluetoothctl list` musí vypsat jeden Controller,
+`/dev/serial0` bude ukazovat na `ttyS0` a `bytes_read` ve stavu musí růst.
+
+Když se přijímač na mini UARTu chová nespolehlivě — rozsypané NMEA nebo
+`bytes_read` na nule — je řešení USB převodník a `SERIAL_PATH=/dev/ttyACM0`.
+Tím se PL011 uvolní úplně a o UART se nikdo nepere.
 
 ### Instalace
 
