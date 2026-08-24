@@ -31,16 +31,14 @@ echo "Installing dependencies"
 
 # The phone has no other way to find the Pi, so a server without this is a
 # server nobody can reach.
-BLUETOOTH_ENABLED=$(grep -E '^BLUETOOTH_ENABLED=' "$APP_DIR/.env" | cut -d= -f2 | tr -d ' ')
 BLUETOOTH_NAME=$(grep -E '^BLUETOOTH_NAME=' "$APP_DIR/.env" | cut -d= -f2 | tr -d ' ')
+BLUETOOTH_CHANNEL=$(grep -E '^BLUETOOTH_CHANNEL=' "$APP_DIR/.env" | cut -d= -f2 | tr -d ' ')
 
-if [ "$BLUETOOTH_ENABLED" = "1" ]; then
-    echo
-    echo "Setting up Bluetooth"
-    bash "$APP_DIR/deploy/bluetooth_setup.sh" "${BLUETOOTH_NAME:-K155GNSS}"
-else
-    echo "BLUETOOTH_ENABLED is not 1, skipping the Bluetooth setup"
-fi
+echo
+echo "Setting up Bluetooth"
+BT_NAME="${BLUETOOTH_NAME:-K155GNSS}"
+BT_CHANNEL="${BLUETOOTH_CHANNEL:-1}"
+bash "$APP_DIR/deploy/bluetooth_setup.sh" "$BT_NAME" "" "$BT_CHANNEL"
 
 # --- Service -----------------------------------------------------------------
 

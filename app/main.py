@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.core import bluetooth, config, serial_link, static_session, ublox
+from app.core import bluetooth, serial_link, static_session, ublox
 from app.routers import bluetooth as bluetooth_router, common, gnss, points, static, storage as storage_router, wifi as wifi_router, ws
 
 
@@ -15,10 +15,10 @@ async def lifespan(app: FastAPI):
     # The supervisor opens the receiver port and reopens it after an unplug
     serial_link.start_supervisor()
 
-    if config.BLUETOOTH_ENABLED:
-        # The only way the phone finds the Pi: it hands over the hotspot
-        # credentials and gets the address back
-        bluetooth.start()
+    # The only way the phone finds the Pi: it hands over the hotspot
+    # credentials and gets the address back. Always on, there is no other
+    # way in.
+    bluetooth.start()
 
     yield   # The server runs in here
 

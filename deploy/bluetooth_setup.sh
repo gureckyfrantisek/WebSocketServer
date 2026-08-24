@@ -2,7 +2,7 @@
 # Prepares the Raspberry Pi so a phone can pair with it and open a serial
 # connection to the server.
 #
-#   sudo bash deploy/bluetooth_setup.sh [name] [pin]
+#   sudo bash deploy/bluetooth_setup.sh [name] [pin] [rfcomm channel]
 #
 # Without a pin the Pi pairs with no prompt at all, which is convenient and
 # means anyone within range can pair. With a pin the phone has to type it, and
@@ -18,6 +18,7 @@ set -e
 
 NAME="${1:-K155GNSS}"
 PIN="${2:-}"
+CHANNEL="${3:-1}"
 
 echo "Setting the Pi up as \"$NAME\""
 
@@ -152,36 +153,58 @@ fi
 
 echo "Naming the adapter and making it discoverable"
 
-# The alias is what the phone shows in its list of devices
-bluetoothctl <<EOF
-power on
-system-alias $NAME
-pairable on
-discoverable-timeout 0
-discoverable on
-agent $AGENT_MODE
-default-agent
-EOF
+# One command per bluetoothctl run, never piped into one session. A piped
+# session reaches the end of its input and exits before the last commands have
+# been answered, which is how the adapter ends up visible for three minutes and
+# then gone: discoverable-timeout never took.
+#
+# The alias is what the phone shows in its list of devices. No agent commands
+# here, bt-agent above owns the agent for as long as the Pi is up.
+bluetoothctl power on
+bluetoothctl system-alias "$NAME"
+bluetoothctl pairable on
+bluetoothctl discoverable-timeout 0
+bluetoothctl discoverable on
 
 echo "Adapter state:"
-bluetoothctl show | grep -E "Alias|Powered|Discoverable:|Pairable:"
+bluetoothctl show | grep -E "Alias|Powered|Discoverable|Pairable"
 
-
-# Discoverability normally times out after three minutes. A field unit has
-# nobody around to press a button, so it stays discoverable.
-btmgmt discoverable yes 2>/dev/null || true
+# Anything other than 0 here means the Pi vanishes from the phone on its own
+if ! bluetoothctl show | grep -qE "DiscoverableTimeout: (0x00000000|0)$"; then
+    echo "Discoverability still expires, check DiscoverableTimeout in $MAIN_CONF"
+fi
 
 # --- Serial Port Profile record ----------------------------------------------
 
-echo "Publishing the Serial Port Profile record"
-sdptool add --channel=1 SP || echo "sdptool failed, check that compatibility mode is on"
+# The record lives in the running bluetoothd and nowhere else, so publishing it
+# here would only last until the next reboot or Bluetooth restart. A service
+# tied to bluetooth.service publishes it again every time, which is what keeps
+# the Pi connectable after a reboot without anybody logging in.
+echo "Installing the Serial Port Profile record service"
 
-sdptool browse local | grep -A2 "Serial Port" || echo "No serial port record found"
+UNIT_SOURCE="$(dirname "$0")/sdp-spp.service"
+UNIT_TARGET="/etc/systemd/system/sdp-spp.service"
+
+sed "s|__CHANNEL__|$CHANNEL|g" "$UNIT_SOURCE" > "$UNIT_TARGET"
+
+systemctl daemon-reload
+
+# Enabling it is what makes it run again on every Bluetooth start, and --now
+# publishes the record straight away without waiting for a reboot
+if ! systemctl enable --now sdp-spp; then
+    echo "The Serial Port record service failed, check compatibility mode"
+fi
+
+if ! sdptool browse local | grep -A2 "Serial Port"; then
+    echo "No serial port record found, check that compatibility mode is on"
+fi
 
 echo
 echo "If a phone was paired before, remove the old bond on both sides first."
 echo "On the Pi:"
-bluetoothctl devices Paired | sed 's/^/  /' || true
+# Older bluetoothctl takes no filter after devices and answers "Too many
+# arguments", paired-devices works on every version
+bluetoothctl paired-devices | sed 's/^/  /' || true
 echo "  bluetoothctl remove <address>"
 echo
 echo "Done. On the phone:"
@@ -193,5 +216,5 @@ fi
 echo "  2. Open the app, it connects to the serial profile and hands over"
 echo "     the hotspot credentials"
 echo
-echo "Set BLUETOOTH_ENABLED=1 in .env and restart the service:"
+echo "Restart the service to pick this up:"
 echo "  sudo systemctl restart k155-gnss"

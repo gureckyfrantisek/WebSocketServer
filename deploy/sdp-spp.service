@@ -1,0 +1,25 @@
+# Republishes the Serial Port Profile record whenever Bluetooth comes up.
+#
+# sdptool keeps the record inside the running bluetoothd and nowhere else, so a
+# reboot, or a restart of bluetooth.service, takes it away. Without it a phone
+# cannot learn which channel to open and Android reports the connection as
+# failed, while the Pi still looks healthy.
+#
+# PartOf and WantedBy=bluetooth.service mean this follows the Bluetooth service
+# rather than only running once at boot.
+[Unit]
+Description=Serial Port Profile record for the K155 GNSS server
+After=bluetooth.service
+BindsTo=bluetooth.service
+PartOf=bluetooth.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# bluetoothd is up before the controller is, and sdptool exits cleanly having
+# registered nothing if it gets there first
+ExecStartPre=/bin/sleep 2
+ExecStart=/usr/bin/sdptool add --channel=__CHANNEL__ SP
+
+[Install]
+WantedBy=bluetooth.service

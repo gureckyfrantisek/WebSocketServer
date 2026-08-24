@@ -282,16 +282,34 @@ Druhým parametrem se dá vyžádat PIN při párování, třeba
 `deploy/bluetooth_setup.sh K155GNSS 483920`. Bez něj se telefon spáruje bez
 ptaní, což je pohodlné, ale spárovat se může kdokoliv v dosahu.
 
+Třetím parametrem se dá změnit RFCOMM kanál, ve výchozím stavu 1. Musí
+odpovídat `BLUETOOTH_CHANNEL` v `.env`, `deploy/install.sh` ho předává sám.
+
 Skript pojmenuje adaptér, nastaví párování a hlavně zveřejní záznam Serial Port
 Profile. Bez něj telefon nemá jak zjistit, na který kanál se připojit. To
 vyžaduje `bluetoothd` v režimu kompatibility, což skript zařídí přes override
 systemd jednotky.
 
-Pak v `.env`:
+Záznam Serial Port Profile žije jen v běžícím `bluetoothd`, takže ho restart
+Raspberry Pi i restart služby `bluetooth` smaže. Telefon pak hlásí neúspěšné
+spojení, přestože server na Pi normálně poslouchá. Proto skript instaluje
+jednotku `sdp-spp.service`, která je svázaná s `bluetooth.service` a záznam
+zveřejní pokaždé znovu. Server ho navíc při startu zveřejní také, pokud chybí,
+a adaptér při každém startu znovu zapne, pojmenuje a zviditelní.
+
+Kontrola po restartu:
+
+```bash
+systemctl status sdp-spp
+sudo sdptool browse local | grep -A2 "Serial Port"
+```
+
+Bluetooth se nedá vypnout, telefon nemá jinou cestu k Pi. V `.env` se nastavuje
+jen jméno, kanál a token:
 
 ```
-BLUETOOTH_ENABLED=1
 BLUETOOTH_NAME=K155GNSS
+BLUETOOTH_CHANNEL=1
 BLUETOOTH_TOKEN=
 ```
 
@@ -349,9 +367,9 @@ Skript vytvoří venv, nainstaluje závislosti, připraví Bluetooth, zapíše s
 do systemd, povolí ji při startu a spustí ji. Dá se pouštět opakovaně, třeba po
 `git pull`, existující `.env` nechá být.
 
-Bluetooth krok je součástí instalace schválně. Telefon nemá jinou cestu, jak Pi
-najít, takže server bez připraveného Bluetooth je server, ke kterému se nikdo
-nepřipojí. Přeskočí se jen když je v `.env` `BLUETOOTH_ENABLED=0`.
+Bluetooth krok je součástí instalace schválně a nedá se přeskočit. Telefon nemá
+jinou cestu, jak Pi najít, takže server bez připraveného Bluetooth je server,
+ke kterému se nikdo nepřipojí.
 
 Pokud má párování vyžadovat PIN, spustí se příprava Bluetooth zvlášť:
 

@@ -62,7 +62,6 @@ WS_FRAMING = _env_str("WS_FRAMING", "raw")
 # Bluetooth handshake. The phone is paired once through Android settings, then
 # hands over the hotspot credentials and receives the address to connect to.
 # This is the only way the phone finds the Pi.
-BLUETOOTH_ENABLED = _env_bool("BLUETOOTH_ENABLED", True)
 BLUETOOTH_NAME = _env_str("BLUETOOTH_NAME", "K155GNSS")
 BLUETOOTH_CHANNEL = _env_int("BLUETOOTH_CHANNEL", 1)
 
