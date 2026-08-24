@@ -282,10 +282,27 @@ Druhým parametrem se dá vyžádat PIN při párování, třeba
 `deploy/bluetooth_setup.sh K155GNSS 483920`. Bez něj se telefon spáruje bez
 ptaní, což je pohodlné, ale spárovat se může kdokoliv v dosahu.
 
+Třetím parametrem se dá změnit RFCOMM kanál, ve výchozím stavu 1. Musí
+odpovídat `BLUETOOTH_CHANNEL` v `.env`, `deploy/install.sh` ho předává sám.
+
 Skript pojmenuje adaptér, nastaví párování a hlavně zveřejní záznam Serial Port
 Profile. Bez něj telefon nemá jak zjistit, na který kanál se připojit. To
 vyžaduje `bluetoothd` v režimu kompatibility, což skript zařídí přes override
 systemd jednotky.
+
+Záznam Serial Port Profile žije jen v běžícím `bluetoothd`, takže ho restart
+Raspberry Pi i restart služby `bluetooth` smaže. Telefon pak hlásí neúspěšné
+spojení, přestože server na Pi normálně poslouchá. Proto skript instaluje
+jednotku `sdp-spp.service`, která je svázaná s `bluetooth.service` a záznam
+zveřejní pokaždé znovu. Server ho navíc při startu zveřejní také, pokud chybí,
+a adaptér při každém startu znovu zapne, pojmenuje a zviditelní.
+
+Kontrola po restartu:
+
+```bash
+systemctl status sdp-spp
+sudo sdptool browse local | grep -A2 "Serial Port"
+```
 
 Pak v `.env`:
 

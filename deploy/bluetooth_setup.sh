@@ -2,7 +2,7 @@
 # Prepares the Raspberry Pi so a phone can pair with it and open a serial
 # connection to the server.
 #
-#   sudo bash deploy/bluetooth_setup.sh [name] [pin]
+#   sudo bash deploy/bluetooth_setup.sh [name] [pin] [rfcomm channel]
 #
 # Without a pin the Pi pairs with no prompt at all, which is convenient and
 # means anyone within range can pair. With a pin the phone has to type it, and
@@ -18,6 +18,7 @@ set -e
 
 NAME="${1:-K155GNSS}"
 PIN="${2:-}"
+CHANNEL="${3:-1}"
 
 echo "Setting the Pi up as \"$NAME\""
 
@@ -173,10 +174,28 @@ btmgmt discoverable yes 2>/dev/null || true
 
 # --- Serial Port Profile record ----------------------------------------------
 
-echo "Publishing the Serial Port Profile record"
-sdptool add --channel=1 SP || echo "sdptool failed, check that compatibility mode is on"
+# The record lives in the running bluetoothd and nowhere else, so publishing it
+# here would only last until the next reboot or Bluetooth restart. A service
+# tied to bluetooth.service publishes it again every time, which is what keeps
+# the Pi connectable after a reboot without anybody logging in.
+echo "Installing the Serial Port Profile record service"
 
-sdptool browse local | grep -A2 "Serial Port" || echo "No serial port record found"
+UNIT_SOURCE="$(dirname "$0")/sdp-spp.service"
+UNIT_TARGET="/etc/systemd/system/sdp-spp.service"
+
+sed "s|__CHANNEL__|$CHANNEL|g" "$UNIT_SOURCE" > "$UNIT_TARGET"
+
+systemctl daemon-reload
+
+# Enabling it is what makes it run again on every Bluetooth start, and --now
+# publishes the record straight away without waiting for a reboot
+if ! systemctl enable --now sdp-spp; then
+    echo "The Serial Port record service failed, check compatibility mode"
+fi
+
+if ! sdptool browse local | grep -A2 "Serial Port"; then
+    echo "No serial port record found, check that compatibility mode is on"
+fi
 
 echo
 echo "If a phone was paired before, remove the old bond on both sides first."

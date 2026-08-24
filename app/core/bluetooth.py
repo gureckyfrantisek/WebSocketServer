@@ -15,6 +15,7 @@ import json
 import socket
 import subprocess
 import threading
+import time
 
 from app.core import config, wifi
 
@@ -167,11 +168,102 @@ def has_serial_profile() -> bool:
     return "Serial Port" in result.stdout
 
 
-def prepare_adapter(name: str) -> dict:
+def publish_serial_profile(channel: int) -> bool:
+    """Publishes the Serial Port record and reports whether one is there now.
+
+    sdptool keeps the record inside the running bluetoothd and nowhere else, so
+    a reboot, or a restart of the Bluetooth service, takes it away again.
+    Without the record the phone has no channel to open and Android reports the
+    connection as failed, while this side still looks perfectly healthy. So the
+    record is published on every start rather than once at install time.
+    """
+    if has_serial_profile():
+        return True
+
+    try:
+        result = subprocess.run(
+            ["sdptool", "add", f"--channel={channel}", "SP"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except FileNotFoundError:
+        print("sdptool is not installed, the Serial Port record cannot be published")
+        return False
+    except subprocess.TimeoutExpired:
+        print("sdptool timed out publishing the Serial Port record")
+        return False
+
+    if result.returncode != 0:
+        print(f"Could not publish the Serial Port record: {result.stderr.strip()}")
+        return False
+
+    # sdptool exits cleanly even when it registered nothing at all, which is
+    # what happens when bluetoothd is not in compatibility mode or the server
+    # is not root, so the record is read back rather than taken on trust
+    if not has_serial_profile():
+        print("The Serial Port record did not appear. Check that bluetoothd runs "
+              "with --compat and that the server runs as root")
+        return False
+
+    print(f"Published the Serial Port record on channel {channel}")
+    return True
+
+
+def unblock_adapter() -> bool:
+    """Clears a soft block, and says whether one had to be cleared.
+
+    A blocked adapter still accepts every command, so nothing looks wrong until
+    a phone cannot find the Pi.
+    """
+    try:
+        result = subprocess.run(
+            ["rfkill", "list", "bluetooth"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+    if "Soft blocked: yes" not in result.stdout:
+        return False
+
+    print("Bluetooth is soft blocked, unblocking")
+
+    try:
+        subprocess.run(["rfkill", "unblock", "bluetooth"], timeout=10)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+    return True
+
+
+def wait_for_adapter(timeout: float = 20.0) -> dict:
+    """Waits for the controller to be enumerated before anything is set on it.
+
+    bluetooth.service counts as started before the controller is up, and at
+    boot the server follows it immediately. Commands sent in that gap are
+    accepted and lost, which leaves the Pi listening but invisible until
+    somebody restarts the service by hand.
+    """
+    deadline = time.monotonic() + timeout
+    state = read_adapter()
+
+    while not state["address"] and time.monotonic() < deadline:
+        time.sleep(1.0)
+        state = read_adapter()
+
+    if not state["address"]:
+        print(f"No Bluetooth adapter appeared within {timeout:.0f}s")
+
+    return state
+
+
+def prepare_adapter(name: str, attempts: int = 3) -> dict:
     """Powers the adapter up, names it and keeps it discoverable.
 
     Discoverability normally expires after three minutes, which is no use to a
-    unit sitting in a field, so the timeout is turned off.
+    unit sitting in a field, so the timeout is turned off. Neither discoverable
+    nor pairable comes back reliably after a reboot, so both are set on every
+    start, read back, and set again when they did not take: early after boot
+    the adapter will accept a command and quietly ignore it.
     """
     pairable = "on" if config.BLUETOOTH_PAIRABLE else "off"
 
@@ -185,12 +277,26 @@ def prepare_adapter(name: str) -> dict:
     if name:
         commands.insert(1, f"system-alias {name}")
 
-    success, output = _bluetoothctl(commands)
+    if unblock_adapter():
+        time.sleep(1.0)
 
-    if not success:
-        print(f"Could not prepare the Bluetooth adapter: {output}")
+    state = wait_for_adapter()
 
-    state = read_adapter()
+    for attempt in range(1, attempts + 1):
+        success, output = _bluetoothctl(commands)
+
+        if not success:
+            print(f"Could not prepare the Bluetooth adapter: {output}")
+
+        state = read_adapter()
+
+        if state["powered"] and state["discoverable"] == config.BLUETOOTH_PAIRABLE:
+            return state
+
+        if attempt < attempts:
+            print(f"The adapter did not take the settings, retrying "
+                  f"({attempt}/{attempts})")
+            time.sleep(2.0)
 
     if not state["powered"]:
         print("The Bluetooth adapter is powered down, the phone cannot see the Pi")
@@ -319,6 +425,10 @@ def start():
         print("Bluetooth handshake skipped, no Bluetooth socket support here")
         return
 
+    # Before the socket, because binding on a controller that has not been
+    # enumerated yet fails, and at boot the server can get here first
+    adapter = prepare_adapter(config.BLUETOOTH_NAME)
+
     try:
         _server = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
         _server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -332,19 +442,19 @@ def start():
         _server = None
         return
 
-    adapter = prepare_adapter(config.BLUETOOTH_NAME)
-
+    # Only once something is listening on the channel the record points at
     _state.update({
         "available": True,
         "listening": True,
         "channel": config.BLUETOOTH_CHANNEL,
         "last_error": None,
-        "serial_profile": has_serial_profile(),
+        "serial_profile": publish_serial_profile(config.BLUETOOTH_CHANNEL),
         **adapter,
     })
 
     if not _state["serial_profile"]:
-        print("No Serial Port record is published, run deploy/bluetooth_setup.sh")
+        print("No Serial Port record is published, phones will fail to connect. "
+              "Run deploy/bluetooth_setup.sh")
 
     print(f"Bluetooth adapter {_state['address']} is visible as {_state['name']}, "
           f"powered {_state['powered']}, discoverable {_state['discoverable']}")
