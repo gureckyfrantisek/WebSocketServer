@@ -355,6 +355,32 @@ sudo raspi-config
 Interface Options → Serial Port → přihlašovací shell **ne** → hardware serial
 **ano**, pak restart. Potom `/dev/serial0` patří přijímači.
 
+Raspberry Pi má dva UARTy a Bluetooth jeden z nich potřebuje. Kvalitní PL011
+(`ttyAMA0`) má dostat přijímač, takže Bluetooth se přesouvá na mini UART:
+
+```
+enable_uart=1
+dtoverlay=miniuart-bt
+core_freq_min=500
+```
+
+`core_freq_min` tam musí být. Mini UART odvozuje přenosovou rychlost od
+frekvence jádra GPU, a když ta začne škálovat, `hciuart` se s rádiem nedomluví
+a spadne na `btuart: Initialization timed out`. Bluetooth pak vůbec není
+(`bluetoothctl list` nic nevypíše) a telefon nemá jak Pi najít. Na Pi 3 se
+místo toho použije `core_freq=250`.
+
+Kontrola po restartu:
+
+```bash
+systemctl status hciuart
+bluetoothctl list
+ls -l /dev/serial0
+```
+
+`/dev/serial0` musí ukazovat na `ttyAMA0` a `bluetoothctl list` musí vypsat
+jeden Controller.
+
 ### Instalace
 
 ```bash
